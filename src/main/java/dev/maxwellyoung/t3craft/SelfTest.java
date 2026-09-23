@@ -21,6 +21,7 @@ final class SelfTest {
 	private int targetEntity;
 	private String targetThread;
 	private String chosen;
+	private boolean inWorld;
 
 	private SelfTest(T3CraftClient mod, String prompt) {
 		this.mod = mod;
@@ -93,8 +94,10 @@ final class SelfTest {
 				}
 				if (minecraft.gui.screen() instanceof T3Screen screen) {
 					if (fresh) screen.startNewThread();
-					screen.typeAndSubmit(text, true);
+					// A new-thread run behaves like a real Enter: send and go back to the world.
+					screen.typeAndSubmit(text, !fresh);
 				}
+				inWorld = fresh;
 				advance(Step.WAIT_WORKING, (fresh ? "new thread: " : "sent: ") + text);
 			}
 			case WAIT_WORKING -> {
@@ -106,7 +109,7 @@ final class SelfTest {
 				if (row == null) return;
 				if (row.status() == T3State.Status.NEEDS_YOU && snapshot.focus() != null && !snapshot.focus().approvals().isEmpty()) {
 					if (ticks < 40) return;
-					shot(minecraft, "approval");
+					shot(minecraft, inWorld ? "needs-you" : "approval");
 					var approval = snapshot.focus().approvals().getFirst();
 					if (approval.detail() != null && approval.detail().startsWith("mcp__") && !approval.detail().startsWith("mcp__minecraft__")) {
 						finish(minecraft, "FAIL unexpected approval: " + approval.detail());
@@ -128,6 +131,11 @@ final class SelfTest {
 					}
 					mod.respond(approval, "accept");
 					T3CraftClient.LOGGER.info("SELFTEST approved {}", approval.detail());
+				}
+				if (inWorld && row != null && row.status() == T3State.Status.DONE && ticks > 20) {
+					shot(minecraft, "done");
+					advance(Step.FINISH, "done in world: " + lastMessage(snapshot));
+					return;
 				}
 				if (row != null && row.status() == T3State.Status.DONE && ticks > 40) {
 					shot(minecraft, "done-panel");
@@ -217,7 +225,8 @@ final class SelfTest {
 				advance(Step.HUD, "panel closed");
 			}
 			case HUD -> {
-				if (ticks < 60) return;
+				// While the done toast is still up.
+				if (ticks < 20) return;
 				shot(minecraft, "hud");
 				advance(Step.FINISH, "hud captured");
 			}

@@ -19,8 +19,6 @@ import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
-import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvents;
 import org.slf4j.Logger;
@@ -51,6 +49,9 @@ public final class T3CraftClient implements ClientModInitializer {
 	private T3State state;
 	private KeyMapping openKey;
 	private boolean openPanelNextTick;
+	private String lastPingThread;
+	private long lastPingAt;
+	private static final long PING_JUMP_WINDOW_MS = 60_000;
 	private T3Village village;
 
 	public static T3CraftClient get() {
@@ -81,7 +82,12 @@ public final class T3CraftClient implements ClientModInitializer {
 		SelfTest selfTest = SelfTest.fromSystemProperty(this);
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			if (selfTest != null) selfTest.tick(client);
-			while (openKey.consumeClick()) openPanelNextTick = true;
+			while (openKey.consumeClick()) {
+				openPanelNextTick = true;
+				// Answering a ping: open the thread that pinged, not whatever was focused before.
+				if (lastPingThread != null && System.currentTimeMillis() - lastPingAt < PING_JUMP_WINDOW_MS) focus(lastPingThread);
+				lastPingThread = null;
+			}
 			if (openPanelNextTick && client.gui.screen() == null) {
 				openPanelNextTick = false;
 				openPanel();
@@ -226,15 +232,14 @@ public final class T3CraftClient implements ClientModInitializer {
 				minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.NOTE_BLOCK_BELL, 1.2f));
 			}
 		}
-		SystemToast.addOrUpdate(minecraft.gui.toastManager(), TOAST, heading, Component.literal(title));
-		chat(Component.literal(T3Hud.label(event.status())).withStyle(heading.getStyle()).append(Component.literal(" " + title + " ").withStyle(ChatFormatting.GRAY))
-			.append(openLink(event.thread().id())));
-	}
-
-	private static MutableComponent openLink(String threadId) {
-		return Component.literal("[open]").withStyle(style -> style.withColor(ChatFormatting.AQUA)
-			.withClickEvent(new ClickEvent.RunCommand("/t3 open " + threadId))
-			.withHoverEvent(new HoverEvent.ShowText(Component.literal("Open this thread"))));
+		// One signal per event: the toast (and sound). The corner status only shows ongoing state,
+		// and ` right after a ping opens the thread that pinged, which replaces a chat [open] link.
+		// Short text keeps the toast at its 190-px minimum, so it never grows over the corner status.
+		Component toastTitle = heading.copy().append(Component.literal(" · ` to open").withStyle(ChatFormatting.GRAY));
+		SystemToast.addOrUpdate(minecraft.gui.toastManager(), TOAST, toastTitle,
+			Component.literal(T3Hud.ellipsize(minecraft.font, title, 160)));
+		lastPingThread = event.thread().id();
+		lastPingAt = System.currentTimeMillis();
 	}
 
 	private static void chat(Component message) {

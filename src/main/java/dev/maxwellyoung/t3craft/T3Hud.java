@@ -10,12 +10,12 @@ import java.time.Duration;
 import java.time.Instant;
 
 /**
- * One line in the top-left corner while an agent is busy, waiting on you, or just finished.
- * Quiet otherwise, so it stays out of the way of normal play.
+ * One line in the top-left corner while an agent is working or waiting on you. Quiet
+ * otherwise; completions are announced by the toast, not here.
  */
 final class T3Hud implements HudElement {
-	private static final Duration SHOW_DONE_FOR = Duration.ofSeconds(20);
-
+	/** Widest a toast gets once T3CraftClient keeps its text short (160 + Minecraft's 30 padding). */
+	static final int TOAST_COLUMN = 190;
 	private final T3CraftClient mod;
 
 	T3Hud(T3CraftClient mod) {
@@ -56,45 +56,49 @@ final class T3Hud implements HudElement {
 		T3State.ThreadRow row = snapshot.focusedRow();
 		if (row == null) return;
 
-		boolean recentlyDone = row.status() == T3State.Status.DONE && completedWithin(row, SHOW_DONE_FOR);
+		// Ongoing state only; finishing or failing is an event and the toast says it. If the focused
+		// thread is settled, surface a thread that is waiting on you instead of showing "Done".
+		T3State.ThreadRow shown = row.status() == T3State.Status.WORKING || row.status() == T3State.Status.NEEDS_YOU ? row
+			: snapshot.threads().stream().filter(t -> t.status() == T3State.Status.NEEDS_YOU).findFirst().orElse(null);
+		if (shown == null) return;
 		long othersWaiting = snapshot.threads().stream()
-			.filter(other -> other != row && other.status() == T3State.Status.NEEDS_YOU).count();
-		if (row.status() == T3State.Status.IDLE || (row.status() == T3State.Status.DONE && !recentlyDone)) {
-			if (othersWaiting == 0) return;
-		}
+			.filter(other -> other != shown && other.status() == T3State.Status.NEEDS_YOU).count();
 
 		Font font = minecraft.font;
-		StringBuilder text = new StringBuilder(label(row.status()));
-		if (row.status() == T3State.Status.WORKING) {
-			text.append(' ').append(elapsed(row.workingSince()));
-			if (row.step() != null) text.append(" · ").append(row.step());
+		String status = label(shown.status());
+		String step = "";
+		if (shown.status() == T3State.Status.WORKING) {
+			status += " " + elapsed(shown.workingSince());
+			if (shown.step() != null) step = " · " + shown.step();
 		}
-		String title = ellipsize(font, row.title(), 160);
-		String suffix = othersWaiting > 0 ? "  +" + othersWaiting + " waiting" : "";
-		String hint = row.status() == T3State.Status.NEEDS_YOU ? "  [`]" : "";
+		String suffix = (othersWaiting > 0 ? "  +" + othersWaiting + " waiting" : "")
+			+ (shown.status() == T3State.Status.NEEDS_YOU ? "  [`]" : "");
+
+		// Stay clear of the toast column on the right; shorten the title first, then drop the step.
+		int maxWidth = graphics.guiWidth() - TOAST_COLUMN - 12;
+		int fixed = 12 + 8 + font.width(status) + font.width(suffix) + 6;
+		int titleRoom = maxWidth - fixed - font.width(step);
+		if (titleRoom < 60) {
+			step = "";
+			titleRoom = maxWidth - fixed;
+		}
+		String title = ellipsize(font, shown.title(), Math.max(30, Math.min(160, titleRoom)));
+		String text = status + step;
 
 		int x = 4;
 		int y = 4;
-		int width = 14 + font.width(title) + 8 + font.width(text.toString()) + font.width(suffix + hint) + 6;
+		int width = 12 + font.width(title) + 8 + font.width(text) + font.width(suffix) + 6;
 		graphics.fill(x, y, x + width, y + 14, 0xA0101014);
-		int dotColor = color(row.status());
+		int dotColor = color(shown.status());
 		// Pulse the dot while working so the corner reads as alive at a glance.
-		if (row.status() == T3State.Status.WORKING && (System.currentTimeMillis() / 500) % 2 == 0) dotColor = 0xFF2F5F99;
+		if (shown.status() == T3State.Status.WORKING && (System.currentTimeMillis() / 500) % 2 == 0) dotColor = 0xFF2F5F99;
 		graphics.fill(x + 4, y + 5, x + 8, y + 9, dotColor);
 		int cursor = x + 12;
 		graphics.text(font, title, cursor, y + 3, 0xFFE5E7EB, false);
 		cursor += font.width(title) + 8;
-		graphics.text(font, text.toString(), cursor, y + 3, color(row.status()), false);
-		cursor += font.width(text.toString());
-		graphics.text(font, suffix + hint, cursor, y + 3, 0xFF9CA3AF, false);
-	}
-
-	private static boolean completedWithin(T3State.ThreadRow row, Duration window) {
-		var turn = row.raw().get("latestTurn");
-		if (turn == null || !turn.isJsonObject()) return false;
-		var latestTurn = turn.getAsJsonObject();
-		if (!latestTurn.has("completedAt") || latestTurn.get("completedAt").isJsonNull()) return false;
-		return Instant.parse(latestTurn.get("completedAt").getAsString()).plus(window).isAfter(Instant.now());
+		graphics.text(font, text, cursor, y + 3, color(shown.status()), false);
+		cursor += font.width(text);
+		graphics.text(font, suffix, cursor, y + 3, 0xFF9CA3AF, false);
 	}
 
 	static String ellipsize(Font font, String text, int maxWidth) {

@@ -12,7 +12,7 @@ It is a client-side Fabric mod for Minecraft Java 26.3. It connects to your T3 e
 
 - **Panel.** Press **`** to open it. Your threads are on the left and the conversation on the right, with Markdown rendered: headings, lists, code, tables. **Enter** sends the prompt and puts you back in the game; **Shift+Enter** sends and keeps the panel open. **+ New** starts a thread. Unsent text is kept per thread.
 - **Several machines.** Pair more than one T3 environment (a laptop and a home server, for example) and their threads share one sidebar, each tagged with its machine. Actions go to the machine that owns the thread.
-- **Pings.** While an agent works, the top-left corner shows `Thread · Working 1m 12s · step`. When it finishes, fails, or needs you, you get a toast, a note-block sound, and a clickable **[open]** in chat.
+- **Pings.** While an agent works or waits on you, the top-left corner shows `Thread · Working 1m 12s · step`. When it finishes, fails, or needs you, you get one toast and a note-block sound. Press **`** within a minute to open the thread that pinged.
 - **Approvals and questions.** Approve with **Y** / **N**. When an agent asks something, press **1–9** or click an option, or type your own answer.
 - **Model picker.** Click the model name in the panel header. New threads can use any provider; existing threads can switch unless the provider forbids it.
 - **Village.** `/t3 village` turns your recent threads into villagers a few blocks ahead. Name tags show status, and particles show what they're doing: enchant glyphs while working, notes when they need you, sparkles when done. Right-click a villager to open its thread. The villagers exist only on your client.
@@ -24,7 +24,7 @@ Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 th
 
 ## Install and pair
 
-1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Build the mod (below) and copy `build/libs/t3craft-0.1.0.jar` into `mods/`.
+1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Build the mod (below) and copy `build/libs/t3craft-0.1.1.jar` into `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
 3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
 
@@ -47,14 +47,14 @@ claude mcp add --transport http -s user minecraft http://127.0.0.1:25590/mcp
 
 Agents pick this up in new sessions, so start a new thread after adding it. Only agents on the machine running Minecraft can reach it.
 
-![Done ping after the agent finishes](docs/done-ping.jpg)
+![One toast when the agent finishes; every command it ran is logged in chat](docs/done-ping.jpg)
 
 ## Build and develop
 
 Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).
 
 ```sh
-./gradlew build                     # → build/libs/t3craft-0.1.0.jar
+./gradlew build                     # → build/libs/t3craft-0.1.1.jar
 ./gradlew runServer --args=nogui    # local offline test server in run-server/ (set white-list=false)
 ./gradlew runClient                 # dev client
 ```
