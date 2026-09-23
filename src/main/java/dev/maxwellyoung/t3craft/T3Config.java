@@ -31,6 +31,8 @@ public final class T3Config {
 	public String threadId;
 	/** Where the agent villagers stand; null when the village is off. */
 	public int[] village;
+	/** Hand the player a written report when a watched thread finishes (needs command permission). */
+	public boolean books = true;
 	/** Lets local agents run commands through the MCP server. Off until the player opts in. */
 	public boolean agentCommands;
 
@@ -59,7 +61,7 @@ public final class T3Config {
 				}
 			}
 		} catch (IOException | RuntimeException e) {
-			T3CraftClient.LOGGER.warn("Could not read {}; starting unpaired", path, e);
+			T3Log.LOGGER.warn("Could not read {}; starting unpaired", path, e);
 		}
 		return new T3Config();
 	}
@@ -74,7 +76,7 @@ public final class T3Config {
 				// Windows: rely on the user profile ACLs.
 			}
 		} catch (IOException e) {
-			T3CraftClient.LOGGER.warn("Could not save {}", path, e);
+			T3Log.LOGGER.warn("Could not save {}", path, e);
 		}
 	}
 }

@@ -5,16 +5,11 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.npc.villager.Villager;
-import net.minecraft.world.entity.npc.villager.VillagerProfession;
 import net.minecraft.world.phys.EntityHitResult;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -24,19 +19,11 @@ import java.util.Set;
 /**
  * Your threads as villagers standing around a spot you choose. Name and particles show
  * status; right-click one to open its thread. They exist only on this client (negative
- * entity ids, never sent to the server), so this works on any server.
+ * entity ids, never sent to the server), so this works on any server. Right-clicks on a
+ * server's shared village (real villagers, see {@link ServerVillage}) open threads too.
  */
 final class T3Village {
-	private static final int MAX_VILLAGERS = 8;
-	private static final int PER_ROW = 4;
-	private static final int SPACING = 3;
 	private static final int FIRST_ID = -7_300_000;
-	// Project → outfit, so one project's threads look alike.
-	private static final List<ResourceKey<VillagerProfession>> OUTFITS = List.of(
-		VillagerProfession.LIBRARIAN, VillagerProfession.CARTOGRAPHER, VillagerProfession.CLERIC,
-		VillagerProfession.TOOLSMITH, VillagerProfession.ARMORER, VillagerProfession.FARMER,
-		VillagerProfession.FLETCHER, VillagerProfession.MASON, VillagerProfession.SHEPHERD,
-		VillagerProfession.WEAPONSMITH, VillagerProfession.BUTCHER, VillagerProfession.LEATHERWORKER);
 
 	private final T3CraftClient mod;
 	private final Map<String, Villager> villagers = new HashMap<>();
@@ -59,6 +46,8 @@ final class T3Village {
 
 		if (minecraft.gui.screen() == null && minecraft.hitResult instanceof EntityHitResult hit) {
 			String threadId = threadByEntity.get(hit.getEntity().getId());
+			// A shared village's villagers are real entities whose UUID encodes the thread.
+			if (threadId == null && hit.getEntity() instanceof Villager other) threadId = threadForUuid(other.getUUID());
 			if (threadId != null && minecraft.options.keyUse.consumeClick()) {
 				while (minecraft.options.keyUse.consumeClick()) {
 					// Drain queued clicks so vanilla never sends an interact for an entity the server doesn't have.
@@ -78,6 +67,14 @@ final class T3Village {
 		}
 	}
 
+	/** The thread a shared-village villager stands for, if it is one of ours. */
+	private String threadForUuid(java.util.UUID uuid) {
+		for (T3State.ThreadRow row : mod.state().snapshot().threads()) {
+			if (VillageLayout.villagerUuid(row.id()).equals(uuid)) return row.id();
+		}
+		return null;
+	}
+
 	/** Entity id → thread, for the self-test. */
 	Map<Integer, String> threadsByEntity() {
 		return Map.copyOf(threadByEntity);
@@ -92,16 +89,14 @@ final class T3Village {
 	}
 
 	private void sync(T3State.Snapshot snapshot, BlockPos anchor) {
-		List<T3State.ThreadRow> rows = snapshot.threads().subList(0, Math.min(MAX_VILLAGERS, snapshot.threads().size()));
+		List<T3State.ThreadRow> rows = snapshot.threads().subList(0, Math.min(VillageLayout.MAX_VILLAGERS, snapshot.threads().size()));
 		Set<String> keep = new HashSet<>();
 		for (int slot = 0; slot < rows.size(); slot++) {
 			T3State.ThreadRow row = rows.get(slot);
 			keep.add(row.id());
-			int x = anchor.getX() + (slot % PER_ROW) * SPACING;
-			int z = anchor.getZ() + (slot / PER_ROW) * SPACING;
-			BlockPos column = new BlockPos(x, anchor.getY(), z);
+			BlockPos column = VillageLayout.column(anchor, slot);
 			if (!level.isLoaded(column)) continue;
-			int y = standY(column);
+			int y = VillageLayout.standY(level, column);
 
 			Villager villager = villagers.get(row.id());
 			if (villager == null) {
@@ -114,10 +109,9 @@ final class T3Village {
 				villagers.put(row.id(), villager);
 				threadByEntity.put(villager.getId(), row.id());
 			}
-			villager.snapTo(x + 0.5, y, z + 0.5, villager.getYRot(), 0);
-			villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(),
-				OUTFITS.get(Math.floorMod(row.projectTitle().hashCode(), OUTFITS.size()))).withLevel(5));
-			villager.setCustomName(label(row));
+			villager.snapTo(column.getX() + 0.5, y, column.getZ() + 0.5, villager.getYRot(), 0);
+			villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(), VillageLayout.outfit(row)).withLevel(5));
+			villager.setCustomName(VillageLayout.label(row, mod.state().waitingDetail(row.id())));
 		}
 		villagers.entrySet().removeIf(entry -> {
 			if (keep.contains(entry.getKey())) return false;
@@ -125,29 +119,6 @@ final class T3Village {
 			level.removeEntity(entry.getValue().getId(), Entity.RemovalReason.DISCARDED);
 			return true;
 		});
-	}
-
-	/** Nearest spot within a few blocks of the anchor's height with ground below and room to stand. Heightmaps put them on treetops; leaves don't count as ground. */
-	private int standY(BlockPos column) {
-		for (int offset = 0; offset <= 4; offset++) {
-			for (int dy : new int[] {offset, -offset}) {
-				BlockPos feet = column.above(dy);
-				var ground = level.getBlockState(feet.below());
-				if (ground.isSolid() && !ground.is(net.minecraft.tags.BlockTags.LEAVES)
-					&& level.getBlockState(feet).isAir() && level.getBlockState(feet.above()).isAir()) {
-					return feet.getY();
-				}
-			}
-		}
-		return column.getY();
-	}
-
-	private static Component label(T3State.ThreadRow row) {
-		String title = row.title().length() > 32 ? row.title().substring(0, 31) + "…" : row.title();
-		String status = T3Hud.label(row.status());
-		if (row.status() == T3State.Status.WORKING) status += " " + T3Hud.elapsed(row.workingSince());
-		return Component.literal(title).withColor(0xFFFFFFFF)
-			.append(Component.literal("  " + status).withColor(T3Hud.color(row.status())));
 	}
 
 	private static void face(Villager villager, Minecraft minecraft) {
@@ -166,7 +137,7 @@ final class T3Village {
 			case WORKING -> ParticleTypes.ENCHANT;
 			case NEEDS_YOU -> ParticleTypes.NOTE;
 			case ERROR -> ParticleTypes.ANGRY_VILLAGER;
-			case DONE -> recentlyDone(row) ? ParticleTypes.HAPPY_VILLAGER : null;
+			case DONE -> VillageLayout.recentlyDone(row) ? ParticleTypes.HAPPY_VILLAGER : null;
 			case IDLE -> null;
 		};
 		if (row.status() == T3State.Status.NEEDS_YOU) villager.setUnhappyCounter(20);
@@ -175,13 +146,6 @@ final class T3Village {
 			level.addParticle(particle, villager.getX() + (Math.random() - 0.5) * 0.8, villager.getY() + 2.2 + Math.random() * 0.3,
 				villager.getZ() + (Math.random() - 0.5) * 0.8, 0, 0.05, 0);
 		}
-	}
-
-	private static boolean recentlyDone(T3State.ThreadRow row) {
-		var turn = row.raw().get("latestTurn");
-		if (turn == null || !turn.isJsonObject() || !turn.getAsJsonObject().has("completedAt")
-			|| turn.getAsJsonObject().get("completedAt").isJsonNull()) return false;
-		return Instant.parse(turn.getAsJsonObject().get("completedAt").getAsString()).plus(Duration.ofMinutes(2)).isAfter(Instant.now());
 	}
 
 	private static T3State.ThreadRow row(T3State.Snapshot snapshot, String threadId) {

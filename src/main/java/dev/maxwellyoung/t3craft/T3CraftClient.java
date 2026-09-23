@@ -22,7 +22,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvents;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -36,7 +35,7 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
  */
 public final class T3CraftClient implements ClientModInitializer {
 	public static final String MOD_ID = "t3craft";
-	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+	public static final Logger LOGGER = T3Log.LOGGER;
 	private static final SystemToast.SystemToastId TOAST = new SystemToast.SystemToastId(6000L);
 
 	private static T3CraftClient instance;
@@ -79,6 +78,8 @@ public final class T3CraftClient implements ClientModInitializer {
 		new T3Mcp(() -> config.agentCommands).start();
 		village = new T3Village(this);
 		ClientTickEvents.START_CLIENT_TICK.register(village::tick);
+		net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.ALLOW_GAME.register(
+			(message, overlay) -> overlay || !T3Books.isOwnFeedback(message.getString()));
 		SelfTest selfTest = SelfTest.fromSystemProperty(this);
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			if (selfTest != null) selfTest.tick(client);
@@ -236,12 +237,21 @@ public final class T3CraftClient implements ClientModInitializer {
 		// and ` right after a ping opens the thread that pinged, which replaces a chat [open] link.
 		lastPingThread = event.thread().id();
 		lastPingAt = System.currentTimeMillis();
+		if (config.books && event.status() == T3State.Status.DONE) T3Books.deliver(state, event.thread());
 		// Already looking at this thread in the panel: the sound is enough, a toast would cover it.
 		if (minecraft.gui.screen() instanceof T3Screen && event.thread().id().equals(state.focusedThreadId())) return;
 		// Short text keeps the toast at its 190-px minimum, so it never grows over the corner status.
 		Component toastTitle = heading.copy().append(Component.literal(" · ` to open").withStyle(ChatFormatting.GRAY));
 		SystemToast.addOrUpdate(minecraft.gui.toastManager(), TOAST, toastTitle,
 			Component.literal(T3Hud.ellipsize(minecraft.font, title, 160)));
+	}
+
+	private int setBooks(boolean on) {
+		config.books = on;
+		config.save(configPath);
+		chat(Component.literal(on ? "Finished threads you started or opened here hand you a written report (needs command permission)."
+			: "Report books off."));
+		return 1;
 	}
 
 	private static void chat(Component message) {
@@ -272,6 +282,9 @@ public final class T3CraftClient implements ClientModInitializer {
 			.then(literal("agent-build")
 				.then(literal("on").executes(ctx -> setAgentCommands(true)))
 				.then(literal("off").executes(ctx -> setAgentCommands(false))))
+			.then(literal("books")
+				.then(literal("on").executes(ctx -> setBooks(true)))
+				.then(literal("off").executes(ctx -> setBooks(false))))
 			.then(literal("village")
 				.executes(ctx -> {
 					placeVillage();

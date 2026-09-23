@@ -12,9 +12,10 @@
 		"issues": "https://github.com/maxwellyoung/t3craft/issues"
 	},
 	"icon": "assets/t3craft/icon.png",
-	"environment": "client",
+	"environment": "*",
 	"entrypoints": {
-		"client": ["dev.maxwellyoung.t3craft.T3CraftClient"]
+		"client": ["dev.maxwellyoung.t3craft.T3CraftClient"],
+		"server": ["dev.maxwellyoung.t3craft.T3CraftServer"]
 	},
 	"depends": {
 		"fabricloader": ">=0.19.5",

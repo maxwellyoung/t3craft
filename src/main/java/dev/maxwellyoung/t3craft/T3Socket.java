@@ -153,7 +153,7 @@ final class T3Socket {
 		sending = sending.handle((ok, error) -> null)
 			.thenCompose(ignored -> socket.sendText(text, true))
 			.exceptionally(error -> {
-				T3CraftClient.LOGGER.debug("T3 socket send failed", error);
+				T3Log.LOGGER.debug("T3 socket send failed", error);
 				return null;
 			});
 	}
@@ -181,7 +181,7 @@ final class T3Socket {
 						try {
 							handler.onValue(value.getAsJsonObject());
 						} catch (RuntimeException e) {
-							T3CraftClient.LOGGER.warn("T3 stream handler failed", e);
+							T3Log.LOGGER.warn("T3 stream handler failed", e);
 						}
 					}
 				}

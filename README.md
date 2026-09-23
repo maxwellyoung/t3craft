@@ -6,7 +6,7 @@
 
 ![What it built, with the single "Done" toast](docs/agent-build.jpg)
 
-It is a client-side Fabric mod for Minecraft Java 26.3. It connects to your T3 environments the same way the mobile app does, so it works on any server, and prompts never go through server chat.
+It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3 environments the same way the mobile app does, so it works on any server, and prompts never go through server chat. Installed on a dedicated server as well, it can also run a shared village that everyone on the server sees.
 
 > **Early prototype.** Tested end to end in the Fabric dev client against T3 Code nightly `0.0.43`. It uses T3's client protocol, which is not a documented public API and may change.
 
@@ -17,20 +17,34 @@ It is a client-side Fabric mod for Minecraft Java 26.3. It connects to your T3 e
 - **Pings.** While an agent works or waits on you, the top-left corner shows `Thread · Working 1m 12s · step`. When it finishes, fails, or needs you, you get one toast and a note-block sound. Press **`** within a minute to open the thread that pinged.
 - **Approvals and questions.** Approve with **Y** / **N**. When an agent asks something, press **1–9** or click an option, or type your own answer.
 - **Model picker.** Click the model name in the panel header. New threads can use any provider; existing threads can switch unless the provider forbids it.
-- **Village.** `/t3 village` turns your recent threads into villagers a few blocks ahead. Name tags show status, and particles show what they're doing: enchant glyphs while working, notes when they need you, sparkles when done. Right-click a villager to open its thread. The villagers exist only on your client.
+- **Village.** `/t3 village` turns your recent threads into villagers a few blocks ahead. Name tags show status, and particles show what they're doing: enchant glyphs while working, notes when they need you, sparkles when done. A villager that needs you shows what it's asking on its name tag, e.g. `Needs you: Bash: npm test`; right-click it to open its thread and approve. The villagers exist only on your client.
+- **Report books.** When a thread you started or opened in Minecraft finishes, you get a written book with the agent's reply and the files it changed. Needs command permission (op, or cheats on); `/t3 books off` turns it off.
 - **Live.** Updates stream over T3's RPC socket. If the socket drops, the mod polls until it reconnects.
 
 ![Approving a command from inside the game](docs/approval.jpg)
 
-Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 threads` · `/t3 use <n>` · `/t3 ask <prompt>` · `/t3 new <prompt>` · `/t3 approve` · `/t3 deny` · `/t3 stop` · `/t3 village [off]` · `/t3 agent-build on|off`
+Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 threads` · `/t3 use <n>` · `/t3 ask <prompt>` · `/t3 new <prompt>` · `/t3 approve` · `/t3 deny` · `/t3 stop` · `/t3 village [off]` · `/t3 books on|off` · `/t3 agent-build on|off`
 
 ## Install and pair
 
-1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Build the mod (below) and copy `build/libs/t3craft-0.1.3.jar` into `mods/`.
+1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Build the mod (below) and copy `build/libs/t3craft-0.1.4.jar` into `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
 3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
 
 Pairing asks only for `orchestration:read orchestration:operate`. The token lasts 30 days and is saved to `config/t3craft.json` with owner-only permissions. To remove the device, revoke "Minecraft" in T3 under **Settings → Connections**.
+
+## Shared village (server)
+
+Put the same jar (and Fabric API) in a dedicated server's `mods/` folder, then as an operator:
+
+```text
+/t3village pair <link>   # pair the server with a T3 environment (token saved to the server's config/t3craft.json)
+/t3village here          # place the village a few blocks in front of you
+/t3village status        # connection, thread count, where it is
+/t3village off           # remove it
+```
+
+The server's recent threads become real villagers that every player sees, with or without the mod, including what a waiting thread is asking. Players who have the mod and are paired with the same T3 can right-click one to open its thread. Anyone on the server can read the thread titles and pending commands on the name tags, so only pair a server you share with people you'd show them to.
 
 ## Let agents use Minecraft
 
@@ -64,7 +78,7 @@ Double-clicking **T3 Craft** starts the local test world if it isn't running, op
 Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).
 
 ```sh
-./gradlew build                     # → build/libs/t3craft-0.1.3.jar
+./gradlew build                     # → build/libs/t3craft-0.1.4.jar
 ./gradlew runServer --args=nogui    # local offline test server in run-server/ (set white-list=false)
 ./gradlew runClient                 # dev client
 ```
@@ -77,6 +91,8 @@ Checks:
 ./gradlew runClient -Pselftest='ask: …'          # answers an agent question with the number keys
 ./gradlew runClient -Pselftest='pair: <link>' -Pconfig=/tmp/fresh.json   # new-user path: /t3 pair, first panel, drafts
 ./gradlew runClient -Pselftest='new: …'          # starts a new thread from the panel
+./gradlew runClient -Pselftest='villageflow: …'  # name-tag detail, approve by right-clicking the villager, report book
+./gradlew runClient -Pselftest='shared: <link>'  # /t3village pair + here on the local server, right-click a real villager, off
 ./gradlew runClient -Pselftest=look|village|watch|threads [-Pfocus='<thread title>'] [-Pconfig=<path>]
 ```
 

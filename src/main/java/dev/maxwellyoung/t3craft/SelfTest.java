@@ -2,16 +2,19 @@ package dev.maxwellyoung.t3craft;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
+import net.minecraft.world.entity.npc.villager.Villager;
 
 /**
  * Dev-only end-to-end check, enabled with {@code -Dt3craft.selftest=<prompt>}. The prompt
  * {@code look} only opens the panel, captures it, and hands the game back (read-only).
  * Any other prompt: opens the panel,
  * sends the prompt, approves the first request, and captures Minecraft's own framebuffer at
- * each stage into run/screenshots. Never active in normal play.
+ * each stage into run/screenshots. {@code villageflow:<prompt>} runs the same prompt from the
+ * village (nametag detail, approve by right-clicking the villager, report book) and
+ * {@code shared:<link>} pairs and places the dev server's shared village. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
@@ -43,6 +46,133 @@ final class SelfTest {
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		T3State.ThreadRow row = snapshot.focusedRow();
 		switch (step) {
+			case VFLOW_SEND -> {
+				if (ticks < 40) return;
+				// Like pressing Enter: sends and goes back to the world.
+				if (minecraft.gui.screen() instanceof T3Screen screen) screen.typeAndSubmit(prompt.substring(12).strip(), false);
+				advance(Step.VFLOW_WAIT, "sent; waiting for the villager to need me");
+			}
+			case VFLOW_WAIT -> {
+				if (row == null || row.status() != T3State.Status.NEEDS_YOU || ticks % 10 != 0) return;
+				String detail = mod.state().waitingDetail(row.id());
+				Villager villager = villagerFor(minecraft, row.id());
+				if (detail == null || detail.isEmpty() || villager == null || villager.getCustomName() == null) return;
+				String name = villager.getCustomName().getString();
+				String expected = detail.strip().replaceAll("\\s+", " ");
+				expected = expected.substring(0, Math.min(12, expected.length()));
+				if (!name.contains(expected)) return; // the name refreshes every half second
+				T3CraftClient.LOGGER.info("SELFTEST villager nametag: '{}' (waiting on '{}')", name, detail);
+				targetEntity = villager.getId();
+				minecraft.player.connection.sendCommand("tp @s " + (villager.getX() + 2.5) + " " + villager.getY() + " " + villager.getZ());
+				advance(Step.VFLOW_CLICK, "needs you: " + detail);
+			}
+			case VFLOW_CLICK -> {
+				if (!(minecraft.level.getEntity(targetEntity) instanceof Villager villager)) {
+					finish(minecraft, "FAIL waiting villager disappeared");
+					return;
+				}
+				if (ticks == 20) {
+					minecraft.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, villager.position().add(0, 1.2, 0));
+				}
+				if (ticks == 30) shot(minecraft, "villager-needs-you");
+				if (ticks == 35) net.minecraft.client.KeyMapping.click(minecraft.options.keyUse.getDefaultKey());
+				if (ticks == 60) {
+					if (!(minecraft.gui.screen() instanceof T3Screen) || snapshot.focus() == null || snapshot.focus().approvals().isEmpty()) {
+						finish(minecraft, "FAIL right-clicking the waiting villager did not open its approval");
+						return;
+					}
+					shot(minecraft, "villager-approval");
+					var approval = snapshot.focus().approvals().getFirst();
+					mod.respond(approval, "accept");
+					minecraft.gui.setScreen(null);
+					advance(Step.VFLOW_DONE, "approved " + approval.detail() + " from the villager");
+				}
+			}
+			case VFLOW_DONE -> {
+				if (row == null) return;
+				// Later approvals (e.g. queued turns) are accepted too, until the thread is done.
+				if (row.status() == T3State.Status.NEEDS_YOU && snapshot.focus() != null && !snapshot.focus().approvals().isEmpty() && ticks % 40 == 0) {
+					mod.respond(snapshot.focus().approvals().getFirst(), "accept");
+				}
+				if (row.status() != T3State.Status.DONE) return;
+				if (doneAt == 0) doneAt = ticks;
+				var book = minecraft.player.getInventory().getNonEquipmentItems().stream()
+					.filter(stack -> stack.is(net.minecraft.world.item.Items.WRITTEN_BOOK)).findFirst().orElse(null);
+				if (book == null) {
+					if (ticks - doneAt > 200) finish(minecraft, "FAIL no report book after the thread finished");
+					return;
+				}
+				var content = book.get(net.minecraft.core.component.DataComponents.WRITTEN_BOOK_CONTENT);
+				T3CraftClient.LOGGER.info("SELFTEST report book '{}', {} page(s): {}", content.title().raw(), content.pages().size(),
+					content.pages().getFirst().raw().getString().replace('\n', ' '));
+				minecraft.gui.setScreen(new net.minecraft.client.gui.screens.inventory.BookViewScreen(
+					net.minecraft.client.gui.screens.inventory.BookViewScreen.BookAccess.fromItem(book)));
+				advance(Step.FINISH, "book delivered");
+			}
+			case SHARED_COUNT -> {
+				if (ticks < 200) return;
+				var ids = new java.util.ArrayList<java.util.UUID>();
+				for (var entity : minecraft.level.entitiesForRendering()) {
+					if (entity instanceof Villager villager && villager.getId() > 0 && ours(snapshot, villager)) ids.add(villager.getUUID());
+				}
+				long unique = ids.stream().distinct().count();
+				T3CraftClient.LOGGER.info("SELFTEST shared villagers after restart: {} ({} unique)", ids.size(), unique);
+				minecraft.player.connection.sendCommand("t3village off");
+				finish(minecraft, !ids.isEmpty() && ids.size() == unique && ids.size() <= 8 ? "PASS (no duplicates after restart)"
+					: "FAIL " + ids.size() + " villagers, " + unique + " unique");
+			}
+			case SHARED_PAIR -> {
+				if (ticks < 200) return;
+				minecraft.player.connection.sendCommand("t3village here");
+				advance(Step.SHARED_CHECK, "placed the shared village");
+			}
+			case SHARED_CHECK -> {
+				if (ticks == 100) {
+					var names = new java.util.ArrayList<String>();
+					Villager target = null;
+					for (var entity : minecraft.level.entitiesForRendering()) {
+						if (entity instanceof Villager villager && villager.getId() > 0 && ours(snapshot, villager)) {
+							names.add(villager.getCustomName() == null ? "?" : villager.getCustomName().getString());
+							if (target == null || villager.distanceTo(minecraft.player) < target.distanceTo(minecraft.player)) target = villager;
+						}
+					}
+					T3CraftClient.LOGGER.info("SELFTEST shared village server villagers ({}): {}", names.size(), names);
+					if (target == null || names.size() > 8) {
+						finish(minecraft, "FAIL expected 1-8 shared villagers, saw " + names.size());
+						return;
+					}
+					shot(minecraft, "shared-village");
+					targetEntity = target.getId();
+					minecraft.player.connection.sendCommand("tp @s " + (target.getX() + 2.5) + " " + target.getY() + " " + target.getZ());
+				}
+				if (ticks == 120 && minecraft.level.getEntity(targetEntity) instanceof Villager target) {
+					minecraft.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, target.position().add(0, 1.2, 0));
+				}
+				if (ticks == 125) net.minecraft.client.KeyMapping.click(minecraft.options.keyUse.getDefaultKey());
+				if (ticks == 150) {
+					var focused = snapshot.focusedRow();
+					boolean ok = minecraft.gui.screen() instanceof T3Screen && focused != null
+						&& minecraft.level.getEntity(targetEntity) instanceof Villager target && VillageLayout.villagerUuid(focused.id()).equals(target.getUUID());
+					shot(minecraft, "shared-panel");
+					T3CraftClient.LOGGER.info("SELFTEST shared click opened '{}'", focused == null ? null : focused.title());
+					if (!ok) {
+						finish(minecraft, "FAIL right-clicking a shared villager did not open its thread");
+						return;
+					}
+					minecraft.gui.setScreen(null);
+					// shared-keep: leave the village up so a server restart can be checked with shared-count.
+					if (prompt.startsWith("shared-keep:")) {
+						finish(minecraft, "PASS (shared village, kept)");
+						return;
+					}
+					minecraft.player.connection.sendCommand("t3village off");
+				}
+				if (ticks == 200) {
+					long left = minecraft.level.getEntities((net.minecraft.world.entity.Entity) null, minecraft.player.getBoundingBox().inflate(40),
+						entity -> entity instanceof Villager villager && villager.getId() > 0 && ours(snapshot, villager)).size();
+					finish(minecraft, left == 0 ? "PASS (shared village)" : "FAIL " + left + " shared villagers left after /t3village off");
+				}
+			}
 			case THREADS -> {
 				if (!(minecraft.gui.screen() instanceof T3Screen screen)) return;
 				// All machines, then each machine, scrolled to the bottom, with a screenshot of each.
@@ -152,6 +282,28 @@ final class SelfTest {
 					minecraft.player.connection.sendCommand("tp @s ~ ~14 ~ ~ 40");
 					mod.setAgentCommands(true);
 					advance(Step.WATCH, "watching; screenshot every 15s");
+					return;
+				}
+				if (prompt.startsWith("villageflow:") || prompt.startsWith("shared:") || prompt.startsWith("shared-keep:")) {
+					// Local test server only: daylight, creative, and an empty hand so right-clicks reach villagers.
+					minecraft.player.connection.sendCommand("time set day");
+					minecraft.player.connection.sendCommand("gamemode creative");
+					minecraft.player.getInventory().setSelectedSlot(8);
+					// So the report-book check can only pass on a book from this run.
+					minecraft.player.connection.sendCommand("clear @s minecraft:written_book");
+					if (prompt.startsWith("shared")) {
+						minecraft.player.connection.sendCommand("t3village off");
+						minecraft.player.connection.sendCommand("t3village pair " + prompt.substring(prompt.indexOf(':') + 1).strip());
+						advance(Step.SHARED_PAIR, "pairing the server");
+					} else {
+						mod.placeVillage(3);
+						mod.openPanel();
+						advance(Step.VFLOW_SEND, "village placed, panel open");
+					}
+					return;
+				}
+				if ("shared-count".equals(prompt)) {
+					advance(Step.SHARED_COUNT, "counting shared villagers after a server restart");
 					return;
 				}
 				if ("village".equals(prompt)) {
@@ -340,6 +492,7 @@ final class SelfTest {
 				advance(Step.FINISH, "hud captured");
 			}
 			case FINISH -> {
+				if (ticks == 30 && prompt.startsWith("villageflow:")) shot(minecraft, "report-book");
 				if (ticks <= 40) return;
 				if (prompt.startsWith("new:")) {
 					// Real-environment demo: leave the game running for the player.
@@ -350,6 +503,19 @@ final class SelfTest {
 				}
 			}
 		}
+	}
+
+	private Villager villagerFor(Minecraft minecraft, String threadId) {
+		for (var entry : mod.village().threadsByEntity().entrySet()) {
+			if (entry.getValue().equals(threadId) && minecraft.level.getEntity(entry.getKey()) instanceof Villager villager) return villager;
+		}
+		return null;
+	}
+
+	/** A server villager standing for one of our threads (shared village). */
+	private static boolean ours(T3State.Snapshot snapshot, Villager villager) {
+		for (T3State.ThreadRow row : snapshot.threads()) if (VillageLayout.villagerUuid(row.id()).equals(villager.getUUID())) return true;
+		return false;
 	}
 
 	private void advance(Step next, String note) {

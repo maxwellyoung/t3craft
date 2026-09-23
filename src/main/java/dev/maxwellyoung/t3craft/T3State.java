@@ -76,6 +76,8 @@ public final class T3State {
 	// second request while the thread is still waiting would otherwise never ping.
 	private final Map<String, Set<String>> seenApprovals = new HashMap<>();
 	private final Consumer<Event> onEvent;
+	// What waiting threads are asking (approval command or question), shown on the waiting villager.
+	private final Map<String, String> waitingDetails = new ConcurrentHashMap<>();
 
 	/** One paired environment: its API, socket, and shell mirror. Owned by the executor thread. */
 	private static final class Env {
@@ -160,7 +162,7 @@ public final class T3State {
 			env.providers = env.api.providers(env.socket);
 		} catch (Exception e) {
 			env.providersLoadedAt = 0;
-			T3CraftClient.LOGGER.warn("Could not load models from {}", env.label, e);
+			T3Log.LOGGER.warn("Could not load models from {}", env.label, e);
 		}
 	}
 
@@ -199,6 +201,24 @@ public final class T3State {
 
 	public String focusedThreadId() {
 		return focusedThreadId;
+	}
+
+	/** The command or question a waiting thread is asking, once fetched; null until then. */
+	public String waitingDetail(String threadId) {
+		return waitingDetails.get(threadId);
+	}
+
+	private void fetchWaitingDetail(String threadId) {
+		Env env = envFor(threadId);
+		if (env == null) return;
+		try {
+			Focus detail = focus(env.api.thread(threadId, 3));
+			String text = !detail.approvals().isEmpty() ? detail.approvals().getFirst().detail()
+				: !detail.userInputs().isEmpty() ? detail.userInputs().getFirst().questions().getFirst().question() : "";
+			waitingDetails.put(threadId, text == null ? "" : text);
+		} catch (Exception e) {
+			T3Log.LOGGER.debug("Could not load what {} is waiting on", threadId, e);
+		}
 	}
 
 	/** Focused, or prompted from the game: the threads that ping. */
@@ -295,12 +315,12 @@ public final class T3State {
 			env.socketFailures++;
 			// Back off to at most a minute; HTTP polling covers the gap.
 			env.nextSocketAttempt = System.currentTimeMillis() + Math.min(60_000, 2_000L << Math.min(5, env.socketFailures));
-			T3CraftClient.LOGGER.debug("{} socket unavailable; polling", env.label, e);
+			T3Log.LOGGER.debug("{} socket unavailable; polling", env.label, e);
 		}
 	}
 
 	private void onSocketClosed(Env env, String reason) {
-		T3CraftClient.LOGGER.info("{} socket closed: {}; polling until it reconnects", env.label, reason);
+		T3Log.LOGGER.info("{} socket closed: {}; polling until it reconnects", env.label, reason);
 		env.shellLive = false;
 		env.socket = null;
 		env.threadRequest = null;
@@ -425,6 +445,13 @@ public final class T3State {
 		List<Event> events = new ArrayList<>();
 		for (ThreadRow row : allRows()) {
 			Status before = lastStatus.put(row.id(), row.status());
+			if (row.status() == Status.NEEDS_YOU && (before != Status.NEEDS_YOU || !waitingDetails.containsKey(row.id()))) {
+				waitingDetails.put(row.id(), ""); // pending; the fetch fills it in
+				String id = row.id();
+				executor.execute(() -> fetchWaitingDetail(id));
+			} else if (row.status() != Status.NEEDS_YOU) {
+				waitingDetails.remove(row.id());
+			}
 			String turn = turnId(row.raw());
 			String turnBefore = lastTurn.put(row.id(), turn);
 			// A new turn id also counts: a short turn can start and finish between two slow polls.
