@@ -100,8 +100,33 @@ public final class T3CraftClient implements ClientModInitializer {
 	}
 
 	public net.minecraft.core.BlockPos villageAnchor() {
-		return config.village == null || config.village.length != 3 || !config.paired() ? null
-			: new net.minecraft.core.BlockPos(config.village[0], config.village[1], config.village[2]);
+		String world = worldKey();
+		if (world == null || !config.paired()) return null;
+		int[] pos = config.villages.get(world);
+		if (pos == null && config.village != null) {
+			// Before 0.1.5 one village followed you into every world; it stays with the first one visited.
+			pos = config.village;
+			config.villages.put(world, pos);
+			config.village = null;
+			config.save(configPath);
+		}
+		return pos == null || pos.length != 3 ? null : new net.minecraft.core.BlockPos(pos[0], pos[1], pos[2]);
+	}
+
+	/** The world and dimension the player is in, so each keeps its own village; null outside a world. */
+	private static String worldKey() {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft.level == null) return null;
+		String where;
+		if (minecraft.getSingleplayerServer() != null) {
+			where = "save:" + minecraft.getSingleplayerServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+				.toAbsolutePath().normalize().getFileName();
+		} else if (minecraft.getCurrentServer() != null) {
+			where = "server:" + minecraft.getCurrentServer().ip.toLowerCase(java.util.Locale.ROOT);
+		} else {
+			return null;
+		}
+		return where + "|" + minecraft.level.dimension().identifier();
 	}
 
 	T3Village village() {
@@ -116,8 +141,10 @@ public final class T3CraftClient implements ClientModInitializer {
 	void placeVillage(int distance) {
 		var player = Minecraft.getInstance().player;
 		if (player == null) return;
+		String world = worldKey();
+		if (world == null) return;
 		var ahead = player.blockPosition().relative(player.getDirection(), distance);
-		config.village = new int[] {ahead.getX(), ahead.getY(), ahead.getZ()};
+		config.villages.put(world, new int[] {ahead.getX(), ahead.getY(), ahead.getZ()});
 		config.save(configPath);
 		village.clear();
 	}
@@ -163,7 +190,7 @@ public final class T3CraftClient implements ClientModInitializer {
 			return;
 		}
 		T3State.ThreadRow target = row;
-		// The target's own environment: a Klaus thread goes to Klaus.
+		// The target's own environment: a thread from the home server goes to the home server.
 		T3Api api = state.apiFor(target.id());
 		state.run(() -> {
 			if (newThread) {
@@ -292,7 +319,8 @@ public final class T3CraftClient implements ClientModInitializer {
 					return 1;
 				})
 				.then(literal("off").executes(ctx -> {
-					config.village = null;
+					String world = worldKey();
+					if (world != null) config.villages.remove(world);
 					config.save(configPath);
 					village.clear();
 					chat(Component.literal("Village hidden."));

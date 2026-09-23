@@ -39,4 +39,6 @@ replay_*.log
 *.hprof
 *.jfr
 run-server/
-scripts/tunnels.local
+# Extra local worlds (launcher profiles with T3CRAFT_SERVER_DIR)
+run-*/
+scripts/*.local

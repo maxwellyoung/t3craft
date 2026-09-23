@@ -143,7 +143,7 @@ public final class T3Api {
 		return selection;
 	}
 
-	/** The environment's own display name ("Maxwell's MacBook Pro", "Klaus"…); public, no auth. */
+	/** The environment's own display name ("Sam's MacBook Pro", "home-server"…); public, no auth. */
 	public static String environmentLabel(String baseUrl) {
 		try {
 			HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl.replaceAll("/+$", "") + "/.well-known/t3/environment"))

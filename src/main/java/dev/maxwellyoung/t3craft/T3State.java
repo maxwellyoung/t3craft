@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * Follows one or more T3 environments (this Mac, Klaus, …) and reduces them to what the game shows: a short thread list,
+ * Follows one or more T3 environments (this Mac, a home server, …) and reduces them to what the game shows: a short thread list,
  * the focused thread's recent conversation, and pending approvals. Transitions on
  * watched threads (the focused one plus any prompted from Minecraft) become events,
  * which is what lets the player walk away and get pinged.

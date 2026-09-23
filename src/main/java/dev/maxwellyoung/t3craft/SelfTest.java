@@ -302,6 +302,12 @@ final class SelfTest {
 					}
 					return;
 				}
+				if ("anchor".equals(prompt)) {
+					// Which village this world has (each world keeps its own).
+					var anchor = mod.villageAnchor();
+					finish(minecraft, "PASS anchor " + (anchor == null ? "none" : anchor.toShortString()));
+					return;
+				}
 				if ("shared-count".equals(prompt)) {
 					advance(Step.SHARED_COUNT, "counting shared villagers after a server restart");
 					return;

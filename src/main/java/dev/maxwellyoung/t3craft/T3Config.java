@@ -29,8 +29,13 @@ public final class T3Config {
 	public String baseUrl;
 	public String accessToken;
 	public String threadId;
-	/** Where the agent villagers stand; null when the village is off. */
+	/**
+	 * Where the agent villagers stand. On a client this is only the pre-0.1.5 single village,
+	 * adopted by the first world visited; on a server it is the shared village.
+	 */
 	public int[] village;
+	/** Client: each world's village, keyed by world (server address or save) and dimension. */
+	public java.util.Map<String, int[]> villages = new java.util.HashMap<>();
 	/** Hand the player a written report when a watched thread finishes (needs command permission). */
 	public boolean books = true;
 	/** Lets local agents run commands through the MCP server. Off until the player opts in. */

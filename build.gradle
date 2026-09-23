@@ -18,11 +18,12 @@ sourceSets {
 loom {
 	runs {
 		server {
-			runDir "run-server"
+			// -PserverDir=<dir> runs a second local world with its own server.properties and port.
+			runDir (project.findProperty('serverDir') ?: 'run-server')
 		}
 		client {
-			// Fixed offline name so the local server's ops.json keeps you opped.
-			programArgs "--username", "Maxwell"
+			// Fixed offline name so the local server's ops.json keeps you opped (-Pusername=<name>).
+			programArgs "--username", (project.findProperty('username') ?: 'Player')
 			// ./gradlew runClient -Pjoin=localhost:25565 goes straight into a server (used by the Mac launcher).
 			if (project.hasProperty('join') && !project.hasProperty('selftest')) {
 				programArgs "--quickPlayMultiplayer", project.property('join')
@@ -32,7 +33,7 @@ loom {
 				vmArg "-Dt3craft.selftest=${project.property('selftest')}"
 				if (project.hasProperty('config')) vmArg "-Dt3craft.config=${project.property('config')}"
 				if (project.hasProperty('focus')) vmArg "-Dt3craft.focus=${project.property('focus')}"
-				programArgs "--quickPlayMultiplayer", "localhost:25565"
+				programArgs "--quickPlayMultiplayer", (project.findProperty('join') ?: 'localhost:25565')
 			}
 		}
 	}

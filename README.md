@@ -17,7 +17,7 @@ It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3
 - **Pings.** While an agent works or waits on you, the top-left corner shows `Thread · Working 1m 12s · step`. When it finishes, fails, or needs you, you get one toast and a note-block sound. Press **`** within a minute to open the thread that pinged.
 - **Approvals and questions.** Approve with **Y** / **N**. When an agent asks something, press **1–9** or click an option, or type your own answer.
 - **Model picker.** Click the model name in the panel header. New threads can use any provider; existing threads can switch unless the provider forbids it.
-- **Village.** `/t3 village` turns your recent threads into villagers a few blocks ahead. Name tags show status, and particles show what they're doing: enchant glyphs while working, notes when they need you, sparkles when done. A villager that needs you shows what it's asking on its name tag, e.g. `Needs you: Bash: npm test`; right-click it to open its thread and approve. The villagers exist only on your client.
+- **Village.** `/t3 village` turns your recent threads into villagers a few blocks ahead. Name tags show status, and particles show what they're doing: enchant glyphs while working, notes when they need you, sparkles when done. A villager that needs you shows what it's asking on its name tag, e.g. `Needs you: Bash: npm test`; right-click it to open its thread and approve. The villagers exist only on your client, and each world keeps its own village.
 - **Report books.** When a thread you started or opened in Minecraft finishes, you get a written book with the agent's reply and the files it changed. Needs command permission (op, or cheats on); `/t3 books off` turns it off.
 - **Live.** Updates stream over T3's RPC socket. If the socket drops, the mod polls until it reconnects.
 
@@ -92,6 +92,16 @@ Agents pick this up in new sessions, so start a new thread after adding it. Only
 ```
 
 Double-clicking **T3 Craft** starts the local test world if it isn't running, opens the Fabric dev client straight into it, and stops the world again when you quit. It needs no Minecraft account (offline dev client). Logs go to `~/Library/Logs/T3Craft/`. If a remote T3 server only answers on its own loopback, list SSH tunnels in `scripts/tunnels.local` (`local-port ssh-host remote-host:port`, one per line, not committed); the launcher opens them first, and you point that environment at `http://127.0.0.1:<local-port>`. The first launch after installing can take about a minute while macOS scans the new app.
+
+The dev client plays as `Player` unless you set a name in `scripts/launcher.local` (not committed), which also lets the app open a different local world:
+
+```sh
+# scripts/launcher.local
+T3CRAFT_USERNAME=Steve              # offline name; keeps your op status and inventory on the local world
+T3CRAFT_SERVER_DIR=run-server       # which local world (its server.properties sets the port)
+```
+
+For a second world with its own app, give it its own profile and server folder (with a different `server-port`), then run `./scripts/install-macos-app.sh --name "My World" --profile scripts/my-world.local`.
 
 ## Build and develop
 
