@@ -51,6 +51,14 @@ Agents pick this up in new sessions, so start a new thread after adding it. Only
 
 ![One toast when the agent finishes; every command it ran is logged in chat](docs/done-ping.jpg)
 
+## Mac launcher (dev setup)
+
+```sh
+./scripts/install-macos-app.sh      # installs "T3 Craft.app" into /Applications
+```
+
+Double-clicking **T3 Craft** starts the local test world if it isn't running, opens the Fabric dev client straight into it, and stops the world again when you quit. It needs no Minecraft account (offline dev client). Logs go to `~/Library/Logs/T3Craft/`. The first launch after installing can take about a minute while macOS scans the new app.
+
 ## Build and develop
 
 Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).

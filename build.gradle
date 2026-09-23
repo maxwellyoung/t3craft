@@ -23,6 +23,10 @@ loom {
 		client {
 			// Fixed offline name so the local server's ops.json keeps you opped.
 			programArgs "--username", "Maxwell"
+			// ./gradlew runClient -Pjoin=localhost:25565 goes straight into a server (used by the Mac launcher).
+			if (project.hasProperty('join') && !project.hasProperty('selftest')) {
+				programArgs "--quickPlayMultiplayer", project.property('join')
+			}
 			// ./gradlew runClient -Pselftest="<prompt>" joins the local runServer and drives the panel.
 			if (project.hasProperty('selftest')) {
 				vmArg "-Dt3craft.selftest=${project.property('selftest')}"
