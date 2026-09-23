@@ -59,7 +59,19 @@ final class T3Hud implements HudElement {
 		// Ongoing state only; finishing or failing is an event and the toast says it. If the focused
 		// thread is settled, surface a thread that is waiting on you instead of showing "Done".
 		T3State.ThreadRow shown = row.status() == T3State.Status.WORKING || row.status() == T3State.Status.NEEDS_YOU ? row
-			: snapshot.threads().stream().filter(t -> t.status() == T3State.Status.NEEDS_YOU).findFirst().orElse(null);
+			// Only threads you're following; a stale approval elsewhere shouldn't own the corner.
+			: snapshot.threads().stream().filter(t -> t.status() == T3State.Status.NEEDS_YOU && mod.state().isWatched(t.id()))
+				.findFirst().orElse(null);
+		long waitingAnywhere = snapshot.threads().stream().filter(t -> t.status() == T3State.Status.NEEDS_YOU).count();
+		if (shown == null && waitingAnywhere > 0) {
+			// Nothing followed is active, but threads elsewhere are waiting: just the count.
+			Font font = minecraft.font;
+			String text = waitingAnywhere + " waiting  [`]";
+			graphics.fill(4, 4, 4 + 12 + font.width(text) + 6, 18, 0xA0101014);
+			graphics.fill(8, 9, 12, 13, color(T3State.Status.NEEDS_YOU));
+			graphics.text(font, text, 16, 7, 0xFF9CA3AF, false);
+			return;
+		}
 		if (shown == null) return;
 		long othersWaiting = snapshot.threads().stream()
 			.filter(other -> other != shown && other.status() == T3State.Status.NEEDS_YOU).count();

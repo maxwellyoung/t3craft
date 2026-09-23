@@ -47,7 +47,9 @@ final class SelfTest {
 				if (!(minecraft.gui.screen() instanceof T3Screen screen)) return;
 				// All machines, then each machine, scrolled to the bottom, with a screenshot of each.
 				if (ticks == 20) {
-					T3CraftClient.LOGGER.info("SELFTEST threads: All machines = {}", screen.sidebarCountForTest());
+					T3CraftClient.LOGGER.info("SELFTEST threads: All machines = {}; oldest thread revealed on open: {}",
+						screen.sidebarCountForTest(), screen.focusedRowVisibleForTest());
+					if (!screen.focusedRowVisibleForTest()) finish(minecraft, "FAIL focused thread not scrolled into view");
 					shot(minecraft, "threads-all");
 				}
 				if (ticks == 30 || ticks == 60) {
@@ -136,6 +138,8 @@ final class SelfTest {
 						.findFirst().ifPresent(t -> mod.focus(t.id()));
 				}
 				if ("threads".equals(prompt)) {
+					// Focus the oldest thread first, so opening has to scroll to reveal it.
+					mod.focus(snapshot.threads().getLast().id());
 					mod.openPanel();
 					advance(Step.THREADS, "panel opened for the thread list");
 					return;

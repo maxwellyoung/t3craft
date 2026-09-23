@@ -88,6 +88,20 @@ final class T3Screen extends Screen {
 		stop = addRenderableWidget(Button.builder(Component.literal("Stop"), b -> mod.interrupt())
 			.bounds(width - MARGIN - 44, MARGIN + 3, 44, 18).build());
 		syncWidgets(mod.state().snapshot());
+		revealFocused();
+	}
+
+	/** Opening on a thread further down (a ping, a villager, /t3 open) scrolls the sidebar to it. */
+	private void revealFocused() {
+		List<T3State.ThreadRow> rows = sidebarRows();
+		String focused = mod.state().focusedThreadId();
+		for (int i = 0; i < rows.size(); i++) {
+			if (!rows.get(i).id().equals(focused)) continue;
+			int visible = visibleRows();
+			if (i < sidebarScroll || i >= sidebarScroll + visible) sidebarScroll = Math.max(0, i - visible / 2);
+			clampSidebarScroll(rows.size());
+			return;
+		}
 	}
 
 	@Override
@@ -126,6 +140,8 @@ final class T3Screen extends Screen {
 		for (T3State.ThreadRow row : mod.state().snapshot().threads()) {
 			if (row.environment() != null && !names.contains(row.environment())) names.add(row.environment());
 		}
+		// Stable order for the filter, whatever was active most recently.
+		names.sort(String.CASE_INSENSITIVE_ORDER);
 		return names;
 	}
 
@@ -244,6 +260,15 @@ final class T3Screen extends Screen {
 		envFilter = at + 1 < machines.size() ? machines.get(at + 1) : null;
 		sidebarScroll = 0;
 		return envFilter;
+	}
+
+	/** Used by the dev self-test: whether the focused thread's row is within the visible window. */
+	boolean focusedRowVisibleForTest() {
+		List<T3State.ThreadRow> rows = sidebarRows();
+		for (int i = 0; i < rows.size(); i++) {
+			if (rows.get(i).id().equals(mod.state().focusedThreadId())) return i >= sidebarScroll && i < sidebarScroll + visibleRows();
+		}
+		return false;
 	}
 
 	/** Used by the dev self-test: rows in the sidebar under the current filter. */

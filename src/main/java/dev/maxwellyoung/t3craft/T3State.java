@@ -201,6 +201,11 @@ public final class T3State {
 		return focusedThreadId;
 	}
 
+	/** Focused, or prompted from the game: the threads that ping. */
+	public boolean isWatched(String threadId) {
+		return watched.contains(threadId);
+	}
+
 	/** Threads prompted from the game stay watched so their completion still pings after switching away. */
 	public void watch(String threadId) {
 		watched.add(threadId);
