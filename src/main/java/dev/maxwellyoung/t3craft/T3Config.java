@@ -36,6 +36,10 @@ public final class T3Config {
 	public int[] village;
 	/** Client: each world's village, keyed by world (server address or save) and dimension. */
 	public java.util.Map<String, int[]> villages = new java.util.HashMap<>();
+	/** Client: worlds (same keys) whose village is the Silk office built at that spot. */
+	public java.util.Set<String> officeWorlds = new java.util.HashSet<>();
+	/** Server: where the shared Silk office stands; null when it's off. */
+	public int[] serverOffice;
 	/** Hand the player a written report when a watched thread finishes (needs command permission). */
 	public boolean books = true;
 	/** Lets local agents run commands through the MCP server. Off until the player opts in. */

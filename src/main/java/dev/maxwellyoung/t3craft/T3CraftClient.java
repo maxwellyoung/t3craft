@@ -52,6 +52,7 @@ public final class T3CraftClient implements ClientModInitializer {
 	private long lastPingAt;
 	private static final long PING_JUMP_WINDOW_MS = 60_000;
 	private T3Village village;
+	private final OfficeQueue office = new OfficeQueue();
 
 	public static T3CraftClient get() {
 		return instance;
@@ -78,8 +79,10 @@ public final class T3CraftClient implements ClientModInitializer {
 		new T3Mcp(() -> config.agentCommands).start();
 		village = new T3Village(this);
 		ClientTickEvents.START_CLIENT_TICK.register(village::tick);
+		ClientTickEvents.START_CLIENT_TICK.register(office::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(village::animate);
 		net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.ALLOW_GAME.register(
-			(message, overlay) -> overlay || !T3Books.isOwnFeedback(message.getString()));
+			(message, overlay) -> overlay || !(T3Books.isOwnFeedback(message.getString()) || office.hideFeedback(message.getString())));
 		SelfTest selfTest = SelfTest.fromSystemProperty(this);
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			if (selfTest != null) selfTest.tick(client);
@@ -133,6 +136,36 @@ public final class T3CraftClient implements ClientModInitializer {
 		return village;
 	}
 
+	OfficeQueue office() {
+		return office;
+	}
+
+	/** One office floor per paired machine, bottom up. */
+	List<String> floors() {
+		return config.environments.stream().map(e -> e.label).toList();
+	}
+
+	/** This world's village is the Silk office. */
+	boolean officeMode() {
+		String world = worldKey();
+		return world != null && config.officeWorlds.contains(world);
+	}
+
+	/** Builds the Silk office just south of the player (door facing them) and moves this world's village into it. */
+	void buildOffice() {
+		var player = Minecraft.getInstance().player;
+		String world = worldKey();
+		if (player == null || world == null) return;
+		var feet = player.blockPosition();
+		// The entry door (10, -2) ends up a few blocks south of the player, logo board above it facing them.
+		var origin = new net.minecraft.core.BlockPos(feet.getX() - 10, feet.getY(), feet.getZ() + 5);
+		config.villages.put(world, new int[] {origin.getX(), origin.getY(), origin.getZ()});
+		config.officeWorlds.add(world);
+		config.save(configPath);
+		village.clear();
+		office.build(origin, floors());
+	}
+
 	/** Puts the agent village a few blocks in front of the player. */
 	public void placeVillage() {
 		placeVillage(4);
@@ -145,6 +178,7 @@ public final class T3CraftClient implements ClientModInitializer {
 		if (world == null) return;
 		var ahead = player.blockPosition().relative(player.getDirection(), distance);
 		config.villages.put(world, new int[] {ahead.getX(), ahead.getY(), ahead.getZ()});
+		config.officeWorlds.remove(world);
 		config.save(configPath);
 		village.clear();
 	}
@@ -312,6 +346,12 @@ public final class T3CraftClient implements ClientModInitializer {
 			.then(literal("books")
 				.then(literal("on").executes(ctx -> setBooks(true)))
 				.then(literal("off").executes(ctx -> setBooks(false))))
+			.then(literal("office").executes(ctx -> {
+				buildOffice();
+				chat(Component.literal("Building suite 408 in front of you. Your agents move in once it's done: working ones at the table, "
+					+ "ones that need you at the whiteboard, finished ones on the beanbags. Needs command permission (op)."));
+				return 1;
+			}))
 			.then(literal("village")
 				.executes(ctx -> {
 					placeVillage();
@@ -320,7 +360,10 @@ public final class T3CraftClient implements ClientModInitializer {
 				})
 				.then(literal("off").executes(ctx -> {
 					String world = worldKey();
-					if (world != null) config.villages.remove(world);
+					if (world != null) {
+						config.villages.remove(world);
+						config.officeWorlds.remove(world);
+					}
 					config.save(configPath);
 					village.clear();
 					chat(Component.literal("Village hidden."));

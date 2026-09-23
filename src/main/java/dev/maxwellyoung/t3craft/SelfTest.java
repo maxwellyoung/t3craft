@@ -14,7 +14,7 @@ import net.minecraft.world.entity.npc.villager.Villager;
  * {@code shared:<link>} pairs and places the dev server's shared village. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
@@ -27,11 +27,17 @@ final class SelfTest {
 	private boolean inWorld;
 	private int questionSeenAt;
 	private int doneAt;
+	private boolean sawDrink;
+	private boolean built;
+	private final boolean flow;
+	private final boolean sharedOffice;
 
 	private SelfTest(T3CraftClient mod, String prompt) {
 		this.mod = mod;
 		this.prompt = prompt;
 		this.step = prompt.startsWith("pair:") ? Step.PAIR_JOIN : Step.WAIT_WORLD;
+		this.flow = prompt.startsWith("officeflow:");
+		this.sharedOffice = prompt.startsWith("sharedoffice:");
 	}
 
 	static SelfTest fromSystemProperty(T3CraftClient mod) {
@@ -46,6 +52,254 @@ final class SelfTest {
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		T3State.ThreadRow row = snapshot.focusedRow();
 		switch (step) {
+			case SILK_WORLD -> {
+				if (ticks == 40) {
+					// Spawn where the player stands, facing south toward the door (yaw 0).
+					minecraft.player.connection.sendCommand("tp @s ~ ~ ~ 0 0");
+					minecraft.player.connection.sendCommand("setworldspawn ~ ~ ~ 0");
+					mod.buildOffice();
+					built = false;
+				}
+				if (ticks <= 45) return;
+				if (mod.office().building()) {
+					built = true;
+					return;
+				}
+				if (!built) return;
+				if (ticks % 20 != 0) return;
+				int agents = mod.village().brainForTest().agents().size();
+				if (agents == 0) return;
+				shot(minecraft, "silk-world");
+				finish(minecraft, "PASS silk world: office at " + mod.villageAnchor().toShortString() + ", " + agents + " agents, floors " + mod.floors());
+			}
+			case OFFICE_SITE -> {
+				if (ticks < 60) return;
+				if (sharedOffice) {
+					advance(Step.OFFICE_SHARED_PAIR, "fresh ground for the server office");
+					return;
+				}
+				mod.buildOffice();
+				advance(Step.OFFICE, "building the office at " + minecraft.player.blockPosition().toShortString());
+			}
+			case OFFICE -> {
+				// Only the first build: later lamp/board updates also queue commands.
+				if (!built && mod.office().building()) {
+					ticks = 0;
+					return;
+				}
+				built = true;
+				var o = mod.villageAnchor();
+				if (flow && ticks == 20) {
+					// Stand at the work tables, looking at the whiteboard end.
+					minecraft.player.getAbilities().flying = true;
+					minecraft.player.onUpdateAbilities();
+					view(minecraft, o, 11, 1.6, 8, 3, 1, 18);
+				}
+				if (flow && ticks >= 60) {
+					advance(Step.FLOW_SEND, "office built at " + o.toShortString() + "; floors " + mod.floors());
+					return;
+				}
+				if (flow) return;
+				if (ticks == 20) {
+					// Out front, far enough back to see the facade and the whole sign board.
+					minecraft.player.getAbilities().flying = true;
+					minecraft.player.onUpdateAbilities();
+					view(minecraft, o, 7, 18, -48, 7, 22, -2);
+				}
+				if (ticks == 60) shot(minecraft, "office-front");
+				// Down the length of the room from the kitchen end, like the photo toward the window.
+				if (ticks == 70) view(minecraft, o, 7, 4.6, 0.6, 7, 1, 29);
+				if (ticks == 110) shot(minecraft, "office-length-walking");
+				if (ticks == 330) shot(minecraft, "office-length");
+				// Behind the sofa, looking at the lounge and window.
+				if (ticks == 340) view(minecraft, o, 7, 3.3, 20.5, 7, 0.8, 30);
+				if (ticks == 380) shot(minecraft, "office-lounge");
+				// From the window end back toward the kitchen.
+				if (ticks == 390) view(minecraft, o, 12, 4.2, 27, 3, 0.8, 0);
+				if (ticks == 410) shot(minecraft, "office-kitchen");
+				// The whiteboard, when a thread needs you.
+				if (ticks == 415) view(minecraft, o, 6, 2.8, 25.2, 1, 2.8, 27.9);
+				if (ticks == 430) shot(minecraft, "office-whiteboard");
+				// Outside the suite door, then a real right-click on it.
+				if (ticks == 435) view(minecraft, o, 10.5, 0, -5.5, 10.5, 1.2, -2);
+				if (ticks == 455) {
+					var door = new net.minecraft.core.BlockPos(o.getX() + 10, o.getY(), o.getZ() - 2);
+					var hit = new net.minecraft.world.phys.BlockHitResult(net.minecraft.world.phys.Vec3.atCenterOf(door),
+						net.minecraft.core.Direction.NORTH, door, false);
+					minecraft.gameMode.useItemOn(minecraft.player, net.minecraft.world.InteractionHand.MAIN_HAND, hit);
+				}
+				if (ticks == 470) {
+					var state = minecraft.level.getBlockState(new net.minecraft.core.BlockPos(o.getX() + 10, o.getY(), o.getZ() - 2));
+					T3CraftClient.LOGGER.info("SELFTEST door after right-click: {}", state);
+					shot(minecraft, "office-door");
+				}
+				// Up the ladder to the second machine's floor.
+				if (ticks == 480 && mod.floors().size() > 1) view(minecraft, o, 12, T3Office.FLOOR_HEIGHT + 1.6, 3, 5, T3Office.FLOOR_HEIGHT + 1, 20);
+				if (ticks == 510 && mod.floors().size() > 1) shot(minecraft, "office-floor2");
+				// Seated workers, close up.
+				if (ticks == 515) view(minecraft, o, 11, 2.4, 6, 6, 1, 13);
+				if (ticks == 540) shot(minecraft, "office-seats");
+				// Night: the lamps as they come on after New York sunset.
+				if (ticks == 545) {
+					minecraft.player.connection.sendCommand("time set midnight");
+					mod.office().send(o, T3Office.lamps(mod.floors().size(), true));
+					view(minecraft, o, 7, 4.6, 0.6, 7, 1, 29);
+				}
+				if (ticks == 590) shot(minecraft, "office-night");
+				if (ticks == 595) {
+					minecraft.player.connection.sendCommand("time set day");
+					mod.office().send(o, T3Office.lamps(mod.floors().size(), NycSun.isNight(java.time.Instant.now())));
+				}
+				if (ticks >= 600) {
+					T3CraftClient.LOGGER.info("SELFTEST office villagers per floor: {}", perFloor());
+					T3CraftClient.LOGGER.info("SELFTEST RESULT PASS (office); game left running");
+					step = Step.DONE;
+				}
+			}
+			case FLOW_SEND -> {
+				if (ticks == 1) mod.openPanel();
+				if (ticks < 20) return;
+				if (minecraft.gui.screen() instanceof T3Screen screen) screen.typeAndSubmit(prompt.substring(11).strip(), false);
+				advance(Step.FLOW_WAIT, "sent from the panel; back in the office");
+			}
+			case FLOW_WAIT -> {
+				if (row == null) return;
+				if (ticks == 60) shot(minecraft, "flow-working");
+				String detail = mod.state().waitingDetail(row.id());
+				if (row.status() != T3State.Status.NEEDS_YOU || detail == null || detail.isEmpty()) return;
+				OfficeBrain.Agent waiting = mod.village().brainForTest().agents().get(row.id());
+				if (waiting == null || waiting.zone != OfficeBrain.Zone.NEEDS_YOU || !waiting.settled()) return;
+				var o = mod.villageAnchor();
+				if (ticks % 20 != 0) return;
+				// Wait for the brain to reach the board and the board to be written.
+				var board = minecraft.level.getBlockEntity(new net.minecraft.core.BlockPos(o.getX() + 2, o.getY() + 3, o.getZ() + 27));
+				String text = board instanceof net.minecraft.world.level.block.entity.SignBlockEntity sign
+					? sign.getText(net.minecraft.world.level.block.entity.SignTextSlot.FRONT).getMessages(false).stream().map(c -> c.getString()).reduce("", (a, b) -> a + b + " ").strip() : "";
+				if (text.isEmpty()) return;
+				T3CraftClient.LOGGER.info("SELFTEST whiteboard detail sign: '{}' (waiting detail '{}')", text, detail);
+				view(minecraft, o, 6, 2.8, 25.2, 1, 2.8, 27.9);
+				advance(Step.FLOW_CLICK, "needs you: " + detail);
+			}
+			case FLOW_CLICK -> {
+				if (ticks == 30) shot(minecraft, "flow-whiteboard");
+				if (ticks == 35) {
+					// Look at the waiting villager and right-click it like a player would.
+					var villager = villagerFor(minecraft, row.id());
+					if (villager == null) {
+						finish(minecraft, "FAIL no villager for the waiting thread");
+						return;
+					}
+					minecraft.player.getAbilities().flying = false;
+					minecraft.player.onUpdateAbilities();
+					minecraft.player.connection.sendCommand("tp @s " + (villager.getX() + 2) + " " + (villager.getY() - villager.getY() % 1) + " " + villager.getZ());
+				}
+				if (ticks == 42) {
+					var villager = villagerFor(minecraft, row.id());
+					minecraft.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, villager.getEyePosition());
+				}
+				if (ticks == 50) net.minecraft.client.KeyMapping.click(minecraft.options.keyUse.getDefaultKey());
+				if (ticks == 70) {
+					if (!(minecraft.gui.screen() instanceof T3Screen) || snapshot.focus() == null || snapshot.focus().approvals().isEmpty()) {
+						finish(minecraft, "FAIL right-click did not open the approval (screen " + minecraft.gui.screen() + ")");
+						return;
+					}
+					shot(minecraft, "flow-approval");
+				}
+				if (ticks == 80) {
+					var approval = snapshot.focus().approvals().getFirst();
+					mod.respond(approval, "accept");
+					minecraft.gui.setScreen(null);
+					// Watch the walk from the work tables to the fridge and the sofa.
+					view(minecraft, mod.villageAnchor(), 12, 3.2, 12, 3, 0.5, 6);
+					advance(Step.FLOW_DONE, "approved " + approval.detail() + " from the villager");
+				}
+			}
+			case FLOW_DONE -> {
+				if (row == null) return;
+				OfficeBrain.Agent agent = mod.village().brainForTest().agents().get(row.id());
+				if (agent != null && agent.pause > 0 && !sawDrink) {
+					sawDrink = true;
+					shot(minecraft, "flow-fridge");
+				}
+				if (agent != null && agent.holding && agent.settled() && doneAt == 0) {
+					doneAt = ticks;
+					view(minecraft, mod.villageAnchor(), 7, 2.6, 20.5, 7, 0.8, 26);
+				}
+				if (doneAt > 0 && ticks - doneAt == 30) shot(minecraft, "flow-sofa");
+				if (doneAt > 0 && ticks - doneAt >= 40) {
+					var book = minecraft.player.getInventory().getNonEquipmentItems().stream()
+						.filter(stack -> stack.is(net.minecraft.world.item.Items.WRITTEN_BOOK)).findFirst().orElse(null);
+					if (book == null) {
+						if (ticks - doneAt < 200) return;
+						finish(minecraft, "FAIL no report book after DONE");
+						return;
+					}
+					var content = book.get(net.minecraft.core.component.DataComponents.WRITTEN_BOOK_CONTENT);
+					T3CraftClient.LOGGER.info("SELFTEST book: '{}' with {} pages; first page: {}", content.title().raw(), content.pages().size(),
+						content.pages().getFirst().raw().getString());
+					minecraft.gui.setScreen(new net.minecraft.client.gui.screens.inventory.BookViewScreen(
+						net.minecraft.client.gui.screens.inventory.BookViewScreen.BookAccess.fromItem(book)));
+					advance(Step.FINISH, "fridge drink " + sawDrink + ", book delivered");
+				}
+			}
+			case OFFICE_SHARED_PAIR -> {
+				if (ticks == 1) {
+					minecraft.player.connection.sendCommand("t3office off");
+					minecraft.player.connection.sendCommand("t3village pair " + prompt.substring(prompt.indexOf(':') + 1).strip());
+				}
+				if (ticks == 200) {
+					minecraft.player.connection.sendCommand("t3office build");
+					advance(Step.OFFICE_SHARED_BUILD, "paired the server and built the shared office");
+				}
+			}
+			case OFFICE_SHARED_BUILD -> {
+				if (ticks == 100) {
+					var feet = minecraft.player.blockPosition();
+					var o = new net.minecraft.core.BlockPos(feet.getX() - 10, feet.getY(), feet.getZ() + 5);
+					minecraft.player.getAbilities().flying = true;
+					minecraft.player.onUpdateAbilities();
+					view(minecraft, o, 7, 4.6, 0.6, 7, 1, 29);
+				}
+				if (ticks == 300) {
+					shot(minecraft, "shared-office");
+					advance(Step.OFFICE_SHARED_CHECK, "looking for server villagers");
+				}
+			}
+			case OFFICE_SHARED_CHECK -> {
+				if (ticks == 10) {
+					var names = new java.util.ArrayList<String>();
+					Villager target = null;
+					for (var entity : minecraft.level.entitiesForRendering()) {
+						if (entity instanceof Villager villager && villager.getId() > 0 && villager.getCustomName() != null) {
+							names.add(villager.getCustomName().getString());
+							if (target == null || villager.distanceTo(minecraft.player) < target.distanceTo(minecraft.player)) target = villager;
+						}
+					}
+					T3CraftClient.LOGGER.info("SELFTEST shared office server villagers: {}", names);
+					if (target == null) {
+						finish(minecraft, "FAIL no server-side office villagers visible");
+						return;
+					}
+					targetEntity = target.getId();
+					// Empty hand (a held book would open instead), walk up, then right-click the real villager.
+					minecraft.player.getInventory().setSelectedSlot(8);
+					minecraft.player.connection.sendCommand("tp @s " + (target.getX() + 1.5) + " " + target.getY() + " " + target.getZ());
+				}
+				if (ticks == 40 && minecraft.level.getEntity(targetEntity) instanceof Villager target) {
+					minecraft.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, target.getEyePosition());
+				}
+				if (ticks == 45) net.minecraft.client.KeyMapping.click(minecraft.options.keyUse.getDefaultKey());
+				if (ticks == 70) {
+					String name = minecraft.level.getEntity(targetEntity) instanceof Villager target ? target.getCustomName().getString() : "?";
+					var focused = snapshot.focusedRow();
+					boolean ok = minecraft.gui.screen() instanceof T3Screen && focused != null
+						&& minecraft.level.getEntity(targetEntity) instanceof Villager target && OfficeBrain.villagerUuid(focused.id()).equals(target.getUUID());
+					shot(minecraft, "shared-panel");
+					T3CraftClient.LOGGER.info("SELFTEST shared click on '{}' opened panel for '{}'", name, focused == null ? null : focused.title());
+					if (!ok) finish(minecraft, "FAIL right-click on a server villager did not open its thread");
+				}
+				if (ticks == 90) finish(minecraft, "PASS (shared office)");
+			}
 			case VFLOW_SEND -> {
 				if (ticks < 40) return;
 				// Like pressing Enter: sends and goes back to the world.
@@ -302,6 +556,23 @@ final class SelfTest {
 					}
 					return;
 				}
+				if ("silkworld".equals(prompt)) {
+					// One-time setup of a showcase world: the office right here at spawn, door just ahead.
+					minecraft.player.connection.sendCommand("gamemode creative");
+					minecraft.player.connection.sendCommand("time set day");
+					minecraft.player.connection.sendCommand("weather clear");
+					advance(Step.SILK_WORLD, "building the office at spawn");
+					return;
+				}
+				if ("office".equals(prompt) || flow || sharedOffice) {
+					minecraft.player.connection.sendCommand("time set day");
+					minecraft.player.connection.sendCommand("weather clear");
+					minecraft.player.connection.sendCommand("gamemode creative");
+					// Fresh ground away from earlier builds.
+					minecraft.player.connection.sendCommand("spreadplayers ~160 ~ 1 20 false @s");
+					advance(Step.OFFICE_SITE, "moving to fresh ground");
+					return;
+				}
 				if ("anchor".equals(prompt)) {
 					// Which village this world has (each world keeps its own).
 					var anchor = mod.villageAnchor();
@@ -498,6 +769,7 @@ final class SelfTest {
 				advance(Step.FINISH, "hud captured");
 			}
 			case FINISH -> {
+				if (flow && ticks == 30) shot(minecraft, "flow-book");
 				if (ticks == 30 && prompt.startsWith("villageflow:")) shot(minecraft, "report-book");
 				if (ticks <= 40) return;
 				if (prompt.startsWith("new:")) {
@@ -516,6 +788,17 @@ final class SelfTest {
 			if (entry.getValue().equals(threadId) && minecraft.level.getEntity(entry.getKey()) instanceof Villager villager) return villager;
 		}
 		return null;
+	}
+
+	private static void view(Minecraft minecraft, net.minecraft.core.BlockPos o, double x, double y, double z, double tx, double ty, double tz) {
+		minecraft.player.connection.sendCommand("tp @s " + (o.getX() + x) + " " + (o.getY() + y) + " " + (o.getZ() + z)
+			+ " facing " + (o.getX() + tx) + " " + (o.getY() + ty) + " " + (o.getZ() + tz));
+	}
+
+	private String perFloor() {
+		var counts = new java.util.TreeMap<Integer, Integer>();
+		for (OfficeBrain.Agent agent : mod.village().brainForTest().agents().values()) counts.merge(agent.floor, 1, Integer::sum);
+		return counts.toString();
 	}
 
 	/** A server villager standing for one of our threads (shared village). */

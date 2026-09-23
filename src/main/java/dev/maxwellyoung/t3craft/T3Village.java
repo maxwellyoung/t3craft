@@ -10,6 +10,7 @@ import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.phys.EntityHitResult;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -31,6 +32,10 @@ final class T3Village {
 	private ClientLevel level;
 	private int ticks;
 	private int nextId = FIRST_ID;
+	// Office mode: the brain decides where agents go; this mirrors them onto client-side villagers.
+	private final OfficeBrain brain = new OfficeBrain();
+	private final Map<Integer, String> boards = new HashMap<>();
+	private Boolean night;
 
 	T3Village(T3CraftClient mod) {
 		this.mod = mod;
@@ -59,20 +64,116 @@ final class T3Village {
 		}
 
 		T3State.Snapshot snapshot = mod.state().snapshot();
-		if (ticks % 10 == 0) sync(snapshot, anchor);
+		boolean office = mod.officeMode();
+		if (office && mod.office().building()) return;
+		if (ticks % 10 == 0) {
+			if (office) syncOffice(snapshot, anchor);
+			else sync(snapshot, anchor);
+		}
 		for (Map.Entry<String, Villager> entry : villagers.entrySet()) {
 			Villager villager = entry.getValue();
-			face(villager, minecraft);
+			if (!office) face(villager, minecraft);
 			if (ticks % 8 == 0) effects(villager, row(snapshot, entry.getKey()));
 		}
 	}
 
-	/** The thread a shared-village villager stands for, if it is one of ours. */
+	/**
+	 * Office mode, after the world has ticked: advance the brain and mirror each agent onto its
+	 * villager. Moving here (not before the tick) lets the renderer interpolate from the old
+	 * position, and the walk animation is driven directly because these villagers have no AI.
+	 */
+	void animate(Minecraft minecraft) {
+		if (level == null || !mod.officeMode() || minecraft.player == null) return;
+		BlockPos o = mod.villageAnchor();
+		if (o == null) return;
+		brain.tick();
+		for (OfficeBrain.Agent agent : brain.agents().values()) {
+			Villager villager = villagers.get(agent.threadId);
+			if (villager == null) continue;
+			villager.setPos(o.getX() + agent.x, o.getY() + agent.y(), o.getZ() + agent.z);
+			if (agent.settled() && Float.isNaN(agent.goal.yaw())) face(villager, minecraft);
+			else turn(villager, agent.yaw);
+			if (agent.walking) villager.walkAnimation.update(1.0F, 0.4F, 1.0F);
+			// A drink from the fridge, carried to the sofa.
+			boolean holds = !villager.getMainHandItem().isEmpty();
+			if (agent.holding != holds) {
+				villager.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND,
+					agent.holding ? new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.HONEY_BOTTLE)
+						: net.minecraft.world.item.ItemStack.EMPTY);
+			}
+			// Faint typing from seated workers when you're close.
+			if (agent.settled() && agent.zone == OfficeBrain.Zone.WORK && Math.random() < 0.05
+				&& minecraft.player.distanceToSqr(villager) < 12 * 12) {
+				level.playLocalSound(villager.getX(), villager.getY() + 0.8, villager.getZ(),
+					net.minecraft.sounds.SoundEvents.WOODEN_BUTTON_CLICK_ON, net.minecraft.sounds.SoundSource.NEUTRAL,
+					0.12F, 1.7F + (float) Math.random() * 0.4F, false);
+			}
+		}
+	}
+
+	private static void turn(Villager villager, float yaw) {
+		villager.setYRot(yaw);
+		villager.setYBodyRot(yaw);
+		villager.setYHeadRot(yaw);
+	}
+
+	/** Office mode: sync the brain with the thread list, then villagers, whiteboards and lamps. */
+	private void syncOffice(T3State.Snapshot snapshot, BlockPos o) {
+		List<String> floors = mod.floors();
+		for (OfficeBrain.Agent gone : brain.sync(snapshot.threads(), floors)) {
+			Villager villager = villagers.remove(gone.threadId);
+			if (villager != null) {
+				threadByEntity.remove(villager.getId());
+				level.removeEntity(villager.getId(), Entity.RemovalReason.DISCARDED);
+			}
+		}
+		for (OfficeBrain.Agent agent : brain.agents().values()) {
+			Villager villager = villagers.get(agent.threadId);
+			if (villager == null) {
+				villager = new Villager(EntityTypes.VILLAGER, level);
+				villager.setId(nextId--);
+				villager.setNoAi(true);
+				villager.setSilent(true);
+				villager.setCustomNameVisible(true);
+				villager.snapTo(o.getX() + agent.x, o.getY() + agent.y(), o.getZ() + agent.z, 0, 0);
+				level.addEntity(villager);
+				villagers.put(agent.threadId, villager);
+				threadByEntity.put(villager.getId(), agent.threadId);
+			}
+			T3State.ThreadRow row = row(snapshot, agent.threadId);
+			if (row != null) {
+				villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(), VillageLayout.outfit(row)).withLevel(5));
+				villager.setCustomName(VillageLayout.label(row, mod.state().waitingDetail(row.id())));
+			}
+		}
+		// Each floor's whiteboard: who needs you and what for (only when it changes).
+		for (int floor = 0; floor < Math.max(1, floors.size()); floor++) {
+			List<T3Office.Note> notes = brain.notes(floor, id -> mod.state().waitingDetail(id));
+			String key = notes.toString();
+			if (!key.equals(boards.get(floor))) {
+				boards.put(floor, key);
+				mod.office().send(o, T3Office.whiteboard(floor, notes));
+			}
+		}
+		// Lamps on after New York sunset, off in the morning.
+		boolean dark = NycSun.isNight(Instant.now());
+		if (night == null || night != dark) {
+			night = dark;
+			mod.office().send(o, T3Office.lamps(floors.size(), dark));
+		}
+	}
+
+	/** The thread a shared village or shared office villager stands for, if it is one of ours. */
 	private String threadForUuid(java.util.UUID uuid) {
 		for (T3State.ThreadRow row : mod.state().snapshot().threads()) {
-			if (VillageLayout.villagerUuid(row.id()).equals(uuid)) return row.id();
+			if (VillageLayout.villagerUuid(row.id()).equals(uuid) || OfficeBrain.villagerUuid(row.id()).equals(uuid)) return row.id();
 		}
 		return null;
+	}
+
+	/** The office brain, for the self-test. */
+	OfficeBrain brainForTest() {
+		return brain;
 	}
 
 	/** Entity id → thread, for the self-test. */
@@ -86,6 +187,9 @@ final class T3Village {
 		}
 		villagers.clear();
 		threadByEntity.clear();
+		brain.clear();
+		boards.clear();
+		night = null;
 	}
 
 	private void sync(T3State.Snapshot snapshot, BlockPos anchor) {

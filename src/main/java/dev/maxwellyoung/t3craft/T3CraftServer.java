@@ -23,6 +23,7 @@ public final class T3CraftServer implements DedicatedServerModInitializer {
 	private T3Config config;
 	private T3State state;
 	private ServerVillage village;
+	private ServerOffice office;
 
 	@Override
 	public void onInitializeServer() {
@@ -30,10 +31,35 @@ public final class T3CraftServer implements DedicatedServerModInitializer {
 		state = new T3State(event -> {});
 		connect();
 		village = new ServerVillage(state, config);
+		office = new ServerOffice(state, config, () -> config.save(configPath));
 		ServerTickEvents.END_SERVER_TICK.register(village::tick);
-		// Village villagers are saved with their chunks; ones from an earlier run are removed as they load.
-		ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> village.onLoad(entity));
+		ServerTickEvents.END_SERVER_TICK.register(office::tick);
+		// Village and office villagers are saved with their chunks; ones from an earlier run are removed as they load.
+		ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
+			village.onLoad(entity);
+			office.onLoad(entity);
+		});
 
+		// The Silk office for everyone on the server (uses the same pairing as /t3village).
+		CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> dispatcher.register(
+			Commands.literal("t3office")
+				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+				.then(Commands.literal("build").executes(ctx -> {
+					var source = ctx.getSource();
+					if (!config.paired()) {
+						source.sendFailure(Component.literal("Pair the server first: /t3village pair <link>"));
+						return 0;
+					}
+					office.build(source.getServer(), BlockPos.containing(source.getPosition()));
+					source.sendSuccess(() -> Component.literal("Suite 408 is up (" + office.floors().size()
+						+ " floor(s)); the agents are walking in."), true);
+					return 1;
+				}))
+				.then(Commands.literal("off").executes(ctx -> {
+					office.off(ctx.getSource().getServer());
+					ctx.getSource().sendSuccess(() -> Component.literal("Office agents sent home."), true);
+					return 1;
+				}))));
 		CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> dispatcher.register(
 			Commands.literal("t3village")
 				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
