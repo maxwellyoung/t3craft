@@ -27,7 +27,27 @@ Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 th
 
 ## Install and pair
 
-1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Build the mod (below) and copy `build/libs/t3craft-0.1.4.jar` into `mods/`.
+**Quickest:** paste this into your coding agent (Claude Code, Codex, T3 Code itself…) on the machine you play Minecraft on:
+
+```text
+Set up T3 Craft (https://github.com/maxwellyoung/t3craft) on this machine so I can use T3 Code from inside Minecraft Java 26.3.
+
+1. Find my Minecraft folder: ~/Library/Application Support/minecraft on macOS, %APPDATA%\.minecraft on Windows, ~/.minecraft on Linux. If it doesn't exist, stop and tell me to install Minecraft Java and launch it once.
+2. If there's no versions/fabric-loader-*-26.3 folder in it, install Fabric Loader: get the latest installer jar from https://meta.fabricmc.net/v2/versions/installer and run
+   java -jar fabric-installer.jar client -dir "<Minecraft folder>" -mcversion 26.3
+   If no Java is available to run it, tell me to run the installer from https://fabricmc.net/use/installer/ myself.
+3. In <Minecraft folder>/mods (create it if needed), add:
+   - the latest Fabric API for 26.3 from https://api.modrinth.com/v2/project/fabric-api/version?game_versions=["26.3"]&loaders=["fabric"]
+   - the latest t3craft jar from https://api.github.com/repos/maxwellyoung/t3craft/releases/latest, after checking its SHA-256 against the release notes.
+   Remove older t3craft-*.jar and fabric-api-*.jar files there. Leave my other mods alone, and delete anything else you downloaded.
+4. If you support MCP servers, add one named "minecraft" at http://127.0.0.1:25590/mcp (streamable HTTP; it only answers while Minecraft is running). For Claude Code:
+   claude mcp add --transport http -s user minecraft http://127.0.0.1:25590/mcp
+5. Then tell me the steps only I can do: in the Minecraft Launcher, play the fabric-loader-…-26.3 profile; in T3 Code, create a pairing link under Settings → Connections; in game, run /t3 pair <link> and press ` to open the panel. Never ask me to paste the pairing link or any token to you.
+```
+
+Or by hand:
+
+1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.1.4.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
 3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
 
