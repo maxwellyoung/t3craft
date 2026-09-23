@@ -234,12 +234,14 @@ public final class T3CraftClient implements ClientModInitializer {
 		}
 		// One signal per event: the toast (and sound). The corner status only shows ongoing state,
 		// and ` right after a ping opens the thread that pinged, which replaces a chat [open] link.
+		lastPingThread = event.thread().id();
+		lastPingAt = System.currentTimeMillis();
+		// Already looking at this thread in the panel: the sound is enough, a toast would cover it.
+		if (minecraft.gui.screen() instanceof T3Screen && event.thread().id().equals(state.focusedThreadId())) return;
 		// Short text keeps the toast at its 190-px minimum, so it never grows over the corner status.
 		Component toastTitle = heading.copy().append(Component.literal(" · ` to open").withStyle(ChatFormatting.GRAY));
 		SystemToast.addOrUpdate(minecraft.gui.toastManager(), TOAST, toastTitle,
 			Component.literal(T3Hud.ellipsize(minecraft.font, title, 160)));
-		lastPingThread = event.thread().id();
-		lastPingAt = System.currentTimeMillis();
 	}
 
 	private static void chat(Component message) {

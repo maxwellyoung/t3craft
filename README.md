@@ -24,7 +24,7 @@ Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 th
 
 ## Install and pair
 
-1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Build the mod (below) and copy `build/libs/t3craft-0.1.1.jar` into `mods/`.
+1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Build the mod (below) and copy `build/libs/t3craft-0.1.2.jar` into `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
 3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
 
@@ -54,7 +54,7 @@ Agents pick this up in new sessions, so start a new thread after adding it. Only
 Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).
 
 ```sh
-./gradlew build                     # → build/libs/t3craft-0.1.1.jar
+./gradlew build                     # → build/libs/t3craft-0.1.2.jar
 ./gradlew runServer --args=nogui    # local offline test server in run-server/ (set white-list=false)
 ./gradlew runClient                 # dev client
 ```
@@ -65,6 +65,7 @@ Checks:
 ./gradlew smoke -Pt3url='<pairing link>' [-Pt3prompt='…'] [-Pt3new=true]   # protocol round trip, no Minecraft
 ./gradlew runClient -Pselftest='<prompt>'        # joins localhost:25565, drives the panel, approves, saves run/screenshots
 ./gradlew runClient -Pselftest='ask: …'          # answers an agent question with the number keys
+./gradlew runClient -Pselftest='pair: <link>' -Pconfig=/tmp/fresh.json   # new-user path: /t3 pair, first panel, drafts
 ./gradlew runClient -Pselftest='new: …'          # starts a new thread from the panel
 ./gradlew runClient -Pselftest=look|village|watch [-Pfocus='<thread title>'] [-Pconfig=<path>]
 ```

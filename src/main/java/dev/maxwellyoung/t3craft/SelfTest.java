@@ -11,21 +11,23 @@ import net.minecraft.client.Screenshot;
  * each stage into run/screenshots. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
-	private Step step = Step.WAIT_WORLD;
+	private Step step;
 	private int ticks;
 	private int deadline = 20 * 600;
 	private int targetEntity;
 	private String targetThread;
 	private String chosen;
 	private boolean inWorld;
+	private int questionSeenAt;
 
 	private SelfTest(T3CraftClient mod, String prompt) {
 		this.mod = mod;
 		this.prompt = prompt;
+		this.step = prompt.startsWith("pair:") ? Step.PAIR_JOIN : Step.WAIT_WORLD;
 	}
 
 	static SelfTest fromSystemProperty(T3CraftClient mod) {
@@ -40,6 +42,44 @@ final class SelfTest {
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		T3State.ThreadRow row = snapshot.focusedRow();
 		switch (step) {
+			case PAIR_JOIN -> {
+				if (minecraft.player == null || ticks < 100) return;
+				if (mod.paired()) {
+					finish(minecraft, "FAIL pair test needs an empty config");
+					return;
+				}
+				// Exactly what a player types; Fabric routes client commands from sendCommand.
+				minecraft.player.connection.sendCommand("t3 pair " + prompt.substring(5).strip());
+				advance(Step.PAIR_WAIT, "typed /t3 pair <link>");
+			}
+			case PAIR_WAIT -> {
+				if (!mod.paired() || !snapshot.connected() || snapshot.threads().isEmpty() || ticks < 20) return;
+				shot(minecraft, "paired-chat");
+				mod.focus(snapshot.threads().getFirst().id());
+				mod.openPanel();
+				advance(Step.DRAFT_TYPE, "paired; " + snapshot.threads().size() + " threads visible");
+			}
+			case DRAFT_TYPE -> {
+				if (ticks < 20) return;
+				if (!(minecraft.gui.screen() instanceof T3Screen screen)) {
+					finish(minecraft, "FAIL panel did not open after pairing");
+					return;
+				}
+				shot(minecraft, "first-panel");
+				screen.setComposerForTest("half-written prompt");
+				minecraft.gui.setScreen(null);
+				advance(Step.DRAFT_REOPEN, "typed a draft and closed the panel");
+			}
+			case DRAFT_REOPEN -> {
+				if (ticks < 10) return;
+				mod.openPanel();
+				advance(Step.DRAFT_CHECK, "reopened");
+			}
+			case DRAFT_CHECK -> {
+				if (ticks < 10) return;
+				String value = minecraft.gui.screen() instanceof T3Screen screen ? screen.composerValueForTest() : null;
+				finish(minecraft, "half-written prompt".equals(value) ? "PASS (pair + draft)" : "FAIL draft was '" + value + "'");
+			}
 			case WAIT_WORLD -> {
 				if (minecraft.player != null && snapshot.connected() && !snapshot.threads().isEmpty() && ticks > 100) {
 					advance(Step.OPEN, "world ready, " + snapshot.threads().size() + " threads, focused " + (row == null ? "none" : row.title()));
@@ -146,6 +186,11 @@ final class SelfTest {
 				var focus = snapshot.focus();
 				if (focus == null || focus.userInputs().isEmpty() || ticks < 20) return;
 				var question = focus.userInputs().getFirst().questions().getFirst();
+				if (questionSeenAt == 0) {
+					questionSeenAt = ticks;
+					return;
+				}
+				if (ticks - questionSeenAt < 15) return;
 				shot(minecraft, "question");
 				if (question.options().size() < 2) {
 					finish(minecraft, "FAIL question has fewer than 2 options");

@@ -194,6 +194,16 @@ final class T3Screen extends Screen {
 		keyPressed(new KeyEvent(InputConstants.KEY_1 + number - 1, 0, 0));
 	}
 
+	/** Used by the dev self-test. */
+	void setComposerForTest(String text) {
+		composer.setValue(text);
+	}
+
+	/** Used by the dev self-test. */
+	String composerValueForTest() {
+		return composer.getValue();
+	}
+
 	/** Used by the dev self-test: same as clicking + New. */
 	void startNewThread() {
 		newThread = true;
@@ -470,7 +480,8 @@ final class T3Screen extends Screen {
 
 	private int questionCardHeight(T3State.Question question, int width) {
 		int lines = 1 + font.split(Component.literal(question.question() == null ? "" : question.question()), width).size();
-		return 8 + lines * font.lineHeight + question.options().size() * (font.lineHeight + 2) + 4;
+		// + one line for the key hint (the input's own placeholder is hidden while it has focus).
+		return 8 + lines * font.lineHeight + question.options().size() * (font.lineHeight + 2) + 4 + font.lineHeight + 2;
 	}
 
 	private void extractQuestion(GuiGraphicsExtractor graphics, T3State.Question question, int x0, int x1, int y, int mouseX, int mouseY) {
@@ -507,6 +518,10 @@ final class T3Screen extends Screen {
 			optionRows.add(new int[] {x0 + 8, rowTop, x1 - 8, rowBottom, i});
 			lineY += font.lineHeight + 2;
 		}
+		String keys = question.options().isEmpty() ? "Type your answer below, then Enter"
+			: "Press 1–" + Math.min(9, question.options().size()) + (question.multiSelect() ? ", then Enter" : "")
+			+ (question.allowCustomAnswer() ? ", or type your own" : "");
+		graphics.text(font, T3Hud.ellipsize(font, keys, width), x0 + 12, lineY + 1, 0xFF9CA3AF, false);
 	}
 
 	private static final int PICKER_ROW = 11;
