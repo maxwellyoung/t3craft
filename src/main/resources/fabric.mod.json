@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "t3craft",
+	"version": "${version}",
+	"name": "T3 Craft",
+	"description": "Talk to your T3 Code threads from inside Minecraft, then keep playing while the agent works.",
+	"authors": ["Maxwell Young"],
+	"license": "MIT",
+	"icon": "assets/t3craft/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": ["dev.maxwellyoung.t3craft.T3CraftClient"]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

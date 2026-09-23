@@ -1,0 +1,73 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+base {
+	archivesName = 't3craft'
+}
+
+sourceSets {
+	// Plain-JVM smoke test for the T3 client; runs against a live server without Minecraft.
+	smoke {
+		java.srcDir 'src/smoke/java'
+		compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+		runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+	}
+}
+
+loom {
+	runs {
+		server {
+			runDir "run-server"
+		}
+		client {
+			// Fixed offline name so the local server's ops.json keeps you opped.
+			programArgs "--username", "Maxwell"
+			// ./gradlew runClient -Pselftest="<prompt>" joins the local runServer and drives the panel.
+			if (project.hasProperty('selftest')) {
+				vmArg "-Dt3craft.selftest=${project.property('selftest')}"
+				if (project.hasProperty('config')) vmArg "-Dt3craft.config=${project.property('config')}"
+				if (project.hasProperty('focus')) vmArg "-Dt3craft.focus=${project.property('focus')}"
+				programArgs "--quickPlayMultiplayer", "localhost:25565"
+			}
+		}
+	}
+
+	mods {
+		"t3craft" {
+			sourceSet sourceSets.main
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+processResources {
+	def version = project.version
+	inputs.property "version", version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+tasks.register('smoke', JavaExec) {
+	description = 'Pair, dispatch, and poll against a live T3 server: -Pt3url=<pairing url>'
+	classpath = sourceSets.smoke.runtimeClasspath
+	mainClass = 'dev.maxwellyoung.t3craft.Smoke'
+	args = [project.findProperty('t3url') ?: '', project.findProperty('t3prompt') ?: '']
+	systemProperty 't3.newThread', project.findProperty('t3new') ?: 'false'
+}
