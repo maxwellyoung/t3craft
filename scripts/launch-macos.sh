@@ -20,6 +20,18 @@ if pgrep -f "java.*dli.env=client" >/dev/null; then
   exit 0
 fi
 
+# Optional SSH tunnels (scripts/tunnels.local, not committed): "local-port ssh-host remote-host:port".
+# Useful when a remote T3 server only answers on its own loopback.
+if [ -f "$REPO/scripts/tunnels.local" ]; then
+  while read -r port host target; do
+    case "$port" in ''|\#*) continue ;; esac
+    if ! lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+      ssh -f -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
+        -L "$port:$target" "$host" >> "$LOGS/tunnels.log" 2>&1 || notify "Couldn't reach $host; its threads won't load."
+    fi
+  done < "$REPO/scripts/tunnels.local"
+fi
+
 started_server=0
 if ! lsof -iTCP:25565 -sTCP:LISTEN >/dev/null 2>&1; then
   notify "Starting your world…"

@@ -57,7 +57,7 @@ Agents pick this up in new sessions, so start a new thread after adding it. Only
 ./scripts/install-macos-app.sh      # installs "T3 Craft.app" into /Applications
 ```
 
-Double-clicking **T3 Craft** starts the local test world if it isn't running, opens the Fabric dev client straight into it, and stops the world again when you quit. It needs no Minecraft account (offline dev client). Logs go to `~/Library/Logs/T3Craft/`. The first launch after installing can take about a minute while macOS scans the new app.
+Double-clicking **T3 Craft** starts the local test world if it isn't running, opens the Fabric dev client straight into it, and stops the world again when you quit. It needs no Minecraft account (offline dev client). Logs go to `~/Library/Logs/T3Craft/`. If a remote T3 server only answers on its own loopback, list SSH tunnels in `scripts/tunnels.local` (`local-port ssh-host remote-host:port`, one per line, not committed); the launcher opens them first, and you point that environment at `http://127.0.0.1:<local-port>`. The first launch after installing can take about a minute while macOS scans the new app.
 
 ## Build and develop
 
