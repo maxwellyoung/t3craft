@@ -78,6 +78,10 @@ Checks:
 - **Notifications:** only the focused thread and threads you prompted from Minecraft notify you. Each new approval or question pings once.
 - **Model list:** comes from `server.getConfig` over the same socket.
 
-## License
+## License and disclaimer
 
-MIT
+MIT. See [LICENSE](LICENSE).
+
+NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.
+
+T3 Craft is an independent community project and is not affiliated with or endorsed by T3 Tools Inc. "T3 Code" is theirs; this mod only talks to it over its client protocol. The jar contains no Minecraft, Fabric, or T3 code.
