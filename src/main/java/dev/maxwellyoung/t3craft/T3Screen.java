@@ -29,6 +29,7 @@ final class T3Screen extends Screen {
 	private static final int COMPOSER = 20;
 	private static final int APPROVAL = 34;
 	private static final int NEW_WIDTH = 40;
+	private static final int FILTER = 14;
 
 	private final T3CraftClient mod;
 	private final long openedAt = System.currentTimeMillis();
@@ -38,6 +39,9 @@ final class T3Screen extends Screen {
 	private Button stop;
 	private boolean newThread;
 	private int scroll;
+	/** Machine shown in the sidebar; null means all of them. */
+	private String envFilter;
+	private int sidebarScroll;
 	/** Model chosen in the picker for the next send; null keeps the thread's current model. */
 	private JsonObject pickedModel;
 	private boolean pickerOpen;
@@ -114,6 +118,35 @@ final class T3Screen extends Screen {
 		approve.visible = deny.visible = hasApproval;
 		T3State.ThreadRow row = snapshot.focusedRow();
 		stop.visible = row != null && row.status() == T3State.Status.WORKING;
+	}
+
+	/** Machines with threads, in sidebar order; empty when only one environment is paired. */
+	private List<String> machines() {
+		List<String> names = new ArrayList<>();
+		for (T3State.ThreadRow row : mod.state().snapshot().threads()) {
+			if (row.environment() != null && !names.contains(row.environment())) names.add(row.environment());
+		}
+		return names;
+	}
+
+	private List<T3State.ThreadRow> sidebarRows() {
+		List<T3State.ThreadRow> rows = new ArrayList<>();
+		for (T3State.ThreadRow row : mod.state().snapshot().threads()) {
+			if (envFilter == null || envFilter.equals(row.environment())) rows.add(row);
+		}
+		return rows;
+	}
+
+	private int listTop() {
+		return MARGIN + HEADER + (machines().size() > 1 ? FILTER : 0);
+	}
+
+	private int visibleRows() {
+		return Math.max(1, (height - MARGIN - listTop()) / ROW);
+	}
+
+	private void clampSidebarScroll(int total) {
+		sidebarScroll = Math.max(0, Math.min(sidebarScroll, total - visibleRows()));
 	}
 
 	private String draftKey() {
@@ -202,6 +235,25 @@ final class T3Screen extends Screen {
 	/** Used by the dev self-test. */
 	String composerValueForTest() {
 		return composer.getValue();
+	}
+
+	/** Used by the dev self-test: same as clicking the machine filter row. */
+	String cycleMachineForTest() {
+		List<String> machines = machines();
+		int at = envFilter == null ? -1 : machines.indexOf(envFilter);
+		envFilter = at + 1 < machines.size() ? machines.get(at + 1) : null;
+		sidebarScroll = 0;
+		return envFilter;
+	}
+
+	/** Used by the dev self-test: rows in the sidebar under the current filter. */
+	int sidebarCountForTest() {
+		return sidebarRows().size();
+	}
+
+	/** Used by the dev self-test: the same path as the mouse wheel over the sidebar. */
+	void scrollSidebarForTest(int notches) {
+		for (int i = 0; i < Math.abs(notches); i++) mouseScrolled(MARGIN + 5, height / 2.0, 0, notches > 0 ? -1 : 1);
 	}
 
 	/** Used by the dev self-test: same as clicking + New. */
@@ -315,10 +367,19 @@ final class T3Screen extends Screen {
 				return true;
 			}
 		}
-		List<T3State.ThreadRow> rows = mod.state().snapshot().threads();
-		int listTop = MARGIN + HEADER;
+		List<T3State.ThreadRow> rows = sidebarRows();
+		int listTop = listTop();
+		List<String> machines = machines();
+		if (machines.size() > 1 && event.x() >= MARGIN && event.x() < MARGIN + SIDEBAR
+			&& event.y() >= MARGIN + HEADER && event.y() < listTop) {
+			// Cycle All → each machine → All.
+			int at = envFilter == null ? -1 : machines.indexOf(envFilter);
+			envFilter = at + 1 < machines.size() ? machines.get(at + 1) : null;
+			sidebarScroll = 0;
+			return true;
+		}
 		if (event.x() >= MARGIN && event.x() < MARGIN + SIDEBAR && event.y() >= listTop) {
-			int index = (int) ((event.y() - listTop) / ROW);
+			int index = (int) ((event.y() - listTop) / ROW) + sidebarScroll;
 			if (index < rows.size()) {
 				mod.saveDraft(draftKey(), composer.getValue());
 				mod.focus(rows.get(index).id());
@@ -342,6 +403,11 @@ final class T3Screen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+		if (!pickerOpen && x < MARGIN + SIDEBAR) {
+			sidebarScroll -= (int) Math.signum(scrollY) * 2;
+			clampSidebarScroll(sidebarRows().size());
+			return true;
+		}
 		if (pickerOpen) {
 			int visible = (pickerBox()[3] - pickerBox()[1] - 4) / PICKER_ROW;
 			pickerScroll = Math.max(0, Math.min(pickerRows().size() - visible, pickerScroll - (int) Math.signum(scrollY) * 2));
@@ -379,18 +445,41 @@ final class T3Screen extends Screen {
 		else if (newHovered) graphics.fill(x1 - NEW_WIDTH, MARGIN + 3, x1 - 3, MARGIN + HEADER - 5, 0x20FFFFFF);
 		graphics.text(font, "+ New", x1 - NEW_WIDTH + 5, MARGIN + 8, 0xFFE5E7EB, false);
 
-		int y = MARGIN + HEADER;
+		List<String> machines = machines();
+		if (envFilter != null && !machines.contains(envFilter)) envFilter = null;
+		List<T3State.ThreadRow> rows = sidebarRows();
+		int top = listTop();
+		if (machines.size() > 1) {
+			boolean hovered = mouseX >= x0 && mouseX < x1 && mouseY >= MARGIN + HEADER && mouseY < top;
+			if (hovered) graphics.fill(x0 + 2, MARGIN + HEADER - 2, x1 - 2, top - 1, 0x20FFFFFF);
+			String label = (envFilter == null ? "All machines" : envFilter) + " · " + rows.size() + " ▾";
+			graphics.text(font, T3Hud.ellipsize(font, label, SIDEBAR - 16), x0 + 8, MARGIN + HEADER + 1, 0xFF9CA3AF, false);
+		}
+
+		clampSidebarScroll(rows.size());
+		int visible = visibleRows();
+		int y = top;
 		String focused = mod.state().focusedThreadId();
-		for (T3State.ThreadRow row : snapshot.threads()) {
-			if (y + ROW > height - MARGIN) break;
+		for (int i = sidebarScroll; i < rows.size() && i < sidebarScroll + visible; i++) {
+			T3State.ThreadRow row = rows.get(i);
 			boolean hovered = mouseX >= x0 && mouseX < x1 && mouseY >= y && mouseY < y + ROW;
 			if (row.id().equals(focused) && !newThread) graphics.fill(x0 + 2, y, x1 - 2, y + ROW, 0x40FFFFFF);
 			else if (hovered) graphics.fill(x0 + 2, y, x1 - 2, y + ROW, 0x20FFFFFF);
 			graphics.fill(x0 + 8, y + 5, x0 + 12, y + 9, T3Hud.color(row.status()));
 			graphics.text(font, T3Hud.ellipsize(font, row.title(), SIDEBAR - 24), x0 + 16, y + 3, 0xFFE5E7EB, false);
-			String meta = (row.environment() == null ? "" : row.environment() + " · ") + row.projectTitle() + " · " + T3Hud.label(row.status());
+			// The machine is in the filter row when filtering, so it's only repeated per row for "All".
+			String machine = row.environment() == null || envFilter != null ? "" : row.environment() + " · ";
+			String meta = machine + row.projectTitle() + " · " + T3Hud.label(row.status());
 			graphics.text(font, T3Hud.ellipsize(font, meta, SIDEBAR - 24), x0 + 16, y + 12, 0xFF6B7280, false);
 			y += ROW;
+		}
+		// Scroll thumb when the list overflows.
+		if (rows.size() > visible) {
+			int trackTop = top;
+			int trackHeight = visible * ROW;
+			int thumbHeight = Math.max(10, trackHeight * visible / rows.size());
+			int thumbTop = trackTop + (trackHeight - thumbHeight) * sidebarScroll / Math.max(1, rows.size() - visible);
+			graphics.fill(x1 - 4, thumbTop, x1 - 2, thumbTop + thumbHeight, 0x60FFFFFF);
 		}
 	}
 

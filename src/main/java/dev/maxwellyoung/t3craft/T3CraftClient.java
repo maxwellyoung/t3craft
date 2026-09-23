@@ -351,7 +351,12 @@ public final class T3CraftClient implements ClientModInitializer {
 			chat(Component.literal(snapshot.error() == null ? "Connecting…" : snapshot.error()).withStyle(ChatFormatting.RED));
 			return 0;
 		}
-		for (int i = 0; i < snapshot.threads().size(); i++) {
+		int shown = Math.min(20, snapshot.threads().size());
+		if (snapshot.threads().size() > shown) {
+			chat(Component.literal("Most recent " + shown + " of " + snapshot.threads().size() + " threads; press ` for all of them.")
+				.withStyle(ChatFormatting.GRAY));
+		}
+		for (int i = 0; i < shown; i++) {
 			int n = i + 1;
 			T3State.ThreadRow row = snapshot.threads().get(i);
 			boolean focused = row.id().equals(state.focusedThreadId());

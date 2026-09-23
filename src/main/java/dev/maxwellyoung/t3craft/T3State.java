@@ -63,7 +63,6 @@ public final class T3State {
 
 	public record Event(ThreadRow thread, Status status) {}
 
-	private static final int THREAD_LIST_LIMIT = 14;
 
 	private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
 		Thread thread = new Thread(runnable, "t3craft-poller");
@@ -450,13 +449,9 @@ public final class T3State {
 	private void publish(List<Event> events) {
 		List<ThreadRow> rows = allRows();
 		rows.sort(Comparator.comparing((ThreadRow row) -> activityAt(row.raw())).reversed());
-		// Keep the focused and watched threads visible even when the list is trimmed.
+		// Every active thread from every machine; the panel scrolls and filters.
 		Map<String, ThreadRow> visible = new LinkedHashMap<>();
-		for (ThreadRow row : rows) {
-			if (visible.size() < THREAD_LIST_LIMIT || row.id().equals(focusedThreadId) || watched.contains(row.id())) {
-				visible.put(row.id(), row);
-			}
-		}
+		for (ThreadRow row : rows) visible.put(row.id(), row);
 		Focus focus = focusDetail != null && focusDetail.threadId().equals(focusedThreadId) ? focusDetail : null;
 		if (focus != null) events = withNewApprovals(focus, rows, events);
 		List<Env> current = envs;

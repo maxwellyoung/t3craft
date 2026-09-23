@@ -11,7 +11,7 @@ import net.minecraft.client.Screenshot;
  * each stage into run/screenshots. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
@@ -43,6 +43,22 @@ final class SelfTest {
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		T3State.ThreadRow row = snapshot.focusedRow();
 		switch (step) {
+			case THREADS -> {
+				if (!(minecraft.gui.screen() instanceof T3Screen screen)) return;
+				// All machines, then each machine, scrolled to the bottom, with a screenshot of each.
+				if (ticks == 20) {
+					T3CraftClient.LOGGER.info("SELFTEST threads: All machines = {}", screen.sidebarCountForTest());
+					shot(minecraft, "threads-all");
+				}
+				if (ticks == 30 || ticks == 60) {
+					String machine = screen.cycleMachineForTest();
+					T3CraftClient.LOGGER.info("SELFTEST threads: {} = {}", machine, screen.sidebarCountForTest());
+				}
+				if (ticks == 40 || ticks == 70) shot(minecraft, "threads-filtered");
+				if (ticks == 45 || ticks == 75) screen.scrollSidebarForTest(100);
+				if (ticks == 50 || ticks == 80) shot(minecraft, "threads-bottom");
+				if (ticks >= 90) finish(minecraft, "PASS (threads)");
+			}
 			case PREP -> {
 				// Test world only: daylight, creative, and hover above the canopy looking slightly down,
 				// so whatever the agent builds "in front of me" is in the screenshot.
@@ -118,6 +134,11 @@ final class SelfTest {
 				if (wanted != null) {
 					snapshot.threads().stream().filter(t -> t.title().toLowerCase().contains(wanted.toLowerCase()))
 						.findFirst().ifPresent(t -> mod.focus(t.id()));
+				}
+				if ("threads".equals(prompt)) {
+					mod.openPanel();
+					advance(Step.THREADS, "panel opened for the thread list");
+					return;
 				}
 				if ("watch".equals(prompt)) {
 					// Local test world: daylight, creative, and let the agent under test build.

@@ -13,7 +13,7 @@ It is a client-side Fabric mod for Minecraft Java 26.3. It connects to your T3 e
 ## What it does
 
 - **Panel.** Press **`** to open it. Your threads are on the left and the conversation on the right, with Markdown rendered: headings, lists, code, tables. **Enter** sends the prompt and puts you back in the game; **Shift+Enter** sends and keeps the panel open. **+ New** starts a thread. Unsent text is kept per thread.
-- **Several machines.** Pair more than one T3 environment (a laptop and a home server, for example) and their threads share one sidebar, each tagged with its machine. Actions go to the machine that owns the thread.
+- **Several machines.** Pair more than one T3 environment (a laptop and a home server, for example) and every active thread from each shares one scrolling sidebar, tagged with its machine. Click the filter row under the header to show one machine at a time. Actions go to the machine that owns the thread.
 - **Pings.** While an agent works or waits on you, the top-left corner shows `Thread · Working 1m 12s · step`. When it finishes, fails, or needs you, you get one toast and a note-block sound. Press **`** within a minute to open the thread that pinged.
 - **Approvals and questions.** Approve with **Y** / **N**. When an agent asks something, press **1–9** or click an option, or type your own answer.
 - **Model picker.** Click the model name in the panel header. New threads can use any provider; existing threads can switch unless the provider forbids it.
@@ -77,7 +77,7 @@ Checks:
 ./gradlew runClient -Pselftest='ask: …'          # answers an agent question with the number keys
 ./gradlew runClient -Pselftest='pair: <link>' -Pconfig=/tmp/fresh.json   # new-user path: /t3 pair, first panel, drafts
 ./gradlew runClient -Pselftest='new: …'          # starts a new thread from the panel
-./gradlew runClient -Pselftest=look|village|watch [-Pfocus='<thread title>'] [-Pconfig=<path>]
+./gradlew runClient -Pselftest=look|village|watch|threads [-Pfocus='<thread title>'] [-Pconfig=<path>]
 ```
 
 `-Pconfig` points the client at a separate pairing file, so tests can use a throwaway T3 server.
