@@ -11,7 +11,7 @@ import net.minecraft.client.Screenshot;
  * each stage into run/screenshots. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
@@ -23,6 +23,7 @@ final class SelfTest {
 	private String chosen;
 	private boolean inWorld;
 	private int questionSeenAt;
+	private int doneAt;
 
 	private SelfTest(T3CraftClient mod, String prompt) {
 		this.mod = mod;
@@ -42,6 +43,31 @@ final class SelfTest {
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		T3State.ThreadRow row = snapshot.focusedRow();
 		switch (step) {
+			case PREP -> {
+				// Test world only: daylight, creative, and hover above the canopy looking slightly down,
+				// so whatever the agent builds "in front of me" is in the screenshot.
+				if (ticks == 1) {
+					minecraft.player.connection.sendCommand("time set day");
+					minecraft.player.connection.sendCommand("weather clear");
+					minecraft.player.connection.sendCommand("gamemode creative");
+				}
+				if (ticks == 30) {
+					minecraft.player.getAbilities().flying = true;
+					minecraft.player.onUpdateAbilities();
+					minecraft.player.connection.sendCommand("tp @s ~ ~6 ~ ~ 18");
+				}
+				if (ticks >= 30 && ticks % 10 == 0 && !minecraft.player.getAbilities().flying) {
+					minecraft.player.getAbilities().flying = true;
+					minecraft.player.onUpdateAbilities();
+				}
+				if (ticks >= 70) advance(Step.OPEN, "hovering at y=" + minecraft.player.blockPosition().getY());
+			}
+			case DONE_PANEL -> {
+				if (ticks == 10) mod.openPanel();
+				// After the done toast has faded, so it doesn't sit over the panel header.
+				if (ticks == 150) shot(minecraft, "done-panel");
+				if (ticks >= 160) advance(Step.FINISH, "panel captured");
+			}
 			case PAIR_JOIN -> {
 				if (minecraft.player == null || ticks < 100) return;
 				if (mod.paired()) {
@@ -81,7 +107,9 @@ final class SelfTest {
 				finish(minecraft, "half-written prompt".equals(value) ? "PASS (pair + draft)" : "FAIL draft was '" + value + "'");
 			}
 			case WAIT_WORLD -> {
-				if (minecraft.player != null && snapshot.connected() && !snapshot.threads().isEmpty() && ticks > 100) {
+				if (minecraft.player != null && snapshot.connected() && !snapshot.threads().isEmpty() && ticks > 100 && prompt.startsWith("new:")) {
+					advance(Step.PREP, "world ready; clearing a view for the build");
+				} else if (minecraft.player != null && snapshot.connected() && !snapshot.threads().isEmpty() && ticks > 100) {
 					advance(Step.OPEN, "world ready, " + snapshot.threads().size() + " threads, focused " + (row == null ? "none" : row.title()));
 				}
 			}
@@ -126,12 +154,7 @@ final class SelfTest {
 				}
 				boolean fresh = prompt.startsWith("new:");
 				String text = fresh ? prompt.substring(4).strip() : prompt;
-				if (fresh) {
-					// Test world: daylight, creative, and a view of the ground ahead for the screenshots.
-					minecraft.player.connection.sendCommand("time set day");
-					minecraft.player.connection.sendCommand("gamemode creative");
-					minecraft.player.setXRot(25);
-				}
+
 				if (minecraft.gui.screen() instanceof T3Screen screen) {
 					if (fresh) screen.startNewThread();
 					// A new-thread run behaves like a real Enter: send and go back to the world.
@@ -172,11 +195,27 @@ final class SelfTest {
 					mod.respond(approval, "accept");
 					T3CraftClient.LOGGER.info("SELFTEST approved {}", approval.detail());
 				}
-				if (inWorld && row != null && row.status() == T3State.Status.DONE && ticks > 20) {
+				if (inWorld && row != null && row.status() == T3State.Status.DONE && doneAt == 0) {
+					doneAt = ticks;
+					// The [agent] command log is useful while playing but hides the build in a still image.
+					minecraft.gui.hud.getChat().clearMessages(false);
+					// Frame the build: look at the beacon the agent placed, from a little above.
+					var center = minecraft.player.blockPosition();
+					for (var pos : net.minecraft.core.BlockPos.betweenClosed(center.offset(-16, -12, -16), center.offset(16, 4, 16))) {
+						if (minecraft.level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.BEACON)) {
+							minecraft.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES,
+								net.minecraft.world.phys.Vec3.atCenterOf(pos).add(0, -1.5, 0));
+							break;
+						}
+					}
+				}
+				// ~3 s: long enough for the beacon beam to form, while the done toast is still up.
+				if (inWorld && doneAt > 0 && ticks - doneAt >= 60) {
 					shot(minecraft, "done");
-					advance(Step.FINISH, "done in world: " + lastMessage(snapshot));
+					advance(Step.DONE_PANEL, "done in world: " + lastMessage(snapshot));
 					return;
 				}
+				if (inWorld) return;
 				if (row != null && row.status() == T3State.Status.DONE && ticks > 40) {
 					shot(minecraft, "done-panel");
 					advance(Step.CLOSE, "done: " + lastMessage(snapshot));

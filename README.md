@@ -2,7 +2,9 @@
 
 [T3 Code](https://t3.codes) inside Minecraft. Send a prompt, go back to mining, and get pinged when the agent finishes, needs an approval, or has a question. Agents can also see and build in your world.
 
-![An agent built this beacon plaza from a prompt typed in-game](docs/agent-build.jpg)
+![The T3 panel in Minecraft: a prompt, and the agent's reply after it built in the world](docs/panel.jpg)
+
+![What it built, with the single "Done" toast](docs/agent-build.jpg)
 
 It is a client-side Fabric mod for Minecraft Java 26.3. It connects to your T3 environments the same way the mobile app does, so it works on any server, and prompts never go through server chat.
 
