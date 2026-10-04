@@ -9,6 +9,8 @@ import java.net.http.HttpResponse;
 /** Security boundary and recovery checks against isolated fixtures, without agent commands. */
 public final class ReliabilityChecks {
 	public static void main(String[] args) throws Exception {
+		T3State unpaired = new T3State(event -> {});
+		check(!unpaired.online(null) && unpaired.connectionError(null) == null, "unpaired panel has no thread owner");
 		for (String host : new String[] {"127.0.0.1:25590", "localhost:25590", "[::1]:25590"}) {
 			Headers headers = new Headers(); headers.set("Host", host);
 			check(McpRequestPolicy.allows(headers, 25590), "native loopback host");

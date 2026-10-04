@@ -96,12 +96,24 @@ final class SelfTest {
 				if (ticks == 270) minecraft.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES,
 					new net.minecraft.world.phys.Vec3(o.getX() + 12.5, o.getY() + 0.8, o.getZ() + 19.5));
 				if (ticks < 280) return;
+				// A moving resident can cross the ray. Do not turn that physical click into a thread-panel click.
+				boolean onLectern = minecraft.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit
+					&& hit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK
+					&& hit.getBlockPos().equals(o.offset(12, 0, 19));
+				if (!onLectern) {
+					if (ticks == 280) T3CraftClient.LOGGER.info("SELFTEST waiting for lectern ray: {}", minecraft.hitResult == null ? "none" : minecraft.hitResult.getType());
+					if (ticks > 400) { shot(minecraft, "lectern-entry-failure"); finish(minecraft, "FAIL packaged lectern ray"); }
+					return;
+				}
 				net.minecraft.client.KeyMapping.click(minecraft.options.keyUse.getDefaultKey());
 				advance(Step.RELEASE_OPEN, "opening packaged review through the lectern");
 			}
 			case RELEASE_OPEN -> {
 				if (ticks < 40) return;
-				if (!(minecraft.gui.screen() instanceof T3ReviewScreen screen)) { finish(minecraft, "FAIL packaged lectern entry"); return; }
+				if (!(minecraft.gui.screen() instanceof T3ReviewScreen screen)) {
+					shot(minecraft, "lectern-entry-failure");
+					finish(minecraft, "FAIL packaged lectern entry: " + (minecraft.gui.screen() == null ? "no screen" : minecraft.gui.screen().getClass().getSimpleName())); return;
+				}
 				if (screen.reviewForTest() == null) return;
 				if (screen.filesForTest().size() != 2 || !screen.reviewForTest().diff().contains("+hello, Minecraft")) {
 					finish(minecraft, "FAIL packaged live checkpoint patch"); return;
