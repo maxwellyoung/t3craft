@@ -142,7 +142,10 @@ final class ServerOffice {
 			}
 		}
 		for (int floor = 0; floor < Math.max(1, floors.size()); floor++) {
-			List<T3Office.Note> notes = brain.notes(floor, state::waitingDetail);
+			String machine = floor < floors().size() ? floors().get(floor) : null;
+			List<T3Office.Note> notes = state.snapshot().threads().stream().filter(row -> row.status() == T3State.Status.NEEDS_YOU)
+				.filter(row -> row.environment() == null || row.environment().equals(machine))
+				.map(row -> new T3Office.Note(row.title(), state.waitingDetail(row.id()))).toList();
 			String key = notes.toString();
 			if (!key.equals(boards.get(floor))) {
 				boards.put(floor, key);

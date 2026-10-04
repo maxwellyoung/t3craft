@@ -35,6 +35,7 @@ public final class T3Api {
 		.build();
 	private final String baseUrl;
 	private final String accessToken;
+	private volatile boolean protocol2;
 
 	public T3Api(String baseUrl, String accessToken) {
 		this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
@@ -87,7 +88,7 @@ public final class T3Api {
 	T3Socket openSocket(java.util.function.Consumer<String> onClose) throws IOException, InterruptedException {
 		JsonObject ticket = JsonParser.parseString(send(authorized("/api/auth/websocket-ticket")
 			.POST(HttpRequest.BodyPublishers.noBody()).build())).getAsJsonObject();
-		URI uri = URI.create(baseUrl.replaceFirst("^http", "ws") + "/ws?wsTicket=" + enc(ticket.get("ticket").getAsString()));
+		URI uri = URI.create(baseUrl.replaceFirst("^http", "ws") + "/ws?orchestrationProtocol=2&wsTicket=" + enc(ticket.get("ticket").getAsString()));
 		return T3Socket.connect(HTTP, uri, onClose);
 	}
 
@@ -156,13 +157,66 @@ public final class T3Api {
 	}
 
 	public JsonObject shell() throws IOException, InterruptedException {
-		return get("/api/orchestration/shell").getAsJsonObject();
+		return adaptShell(get("/api/orchestration/shell").getAsJsonObject());
 	}
 
 	/** Recent window of one thread: messages, activities (approvals), session. */
 	public JsonObject thread(String threadId, int turnLimit) throws IOException, InterruptedException {
-		return get("/api/orchestration/threads/" + enc(threadId) + "?turnLimit=" + turnLimit)
-			.getAsJsonObject().getAsJsonObject("thread");
+		JsonObject body = get("/api/orchestration/threads/" + enc(threadId) + (protocol2 ? "/bounded" : "?turnLimit=" + turnLimit)).getAsJsonObject();
+		if (body.has("projection")) { protocol2 = true; return T3Protocol.projection(body.getAsJsonObject("projection")); }
+		return body.getAsJsonObject("thread");
+	}
+
+
+	JsonObject adaptShell(JsonObject source) {
+		if (source.has("schemaVersion") && source.get("schemaVersion").getAsInt() >= 2) protocol2 = true;
+		JsonObject copy = source.deepCopy();
+		var threads = new com.google.gson.JsonArray();
+		for (var value : source.getAsJsonArray("threads")) threads.add(adaptShellThread(value.getAsJsonObject()));
+		copy.add("threads", threads); return copy;
+	}
+	JsonObject adaptShellThread(JsonObject source) {
+		if (T3Protocol.v2(source)) protocol2 = true;
+		return T3Protocol.shell(source);
+	}
+
+	public record Review(String threadId, String title, int turnCount, String reply, String diff) {}
+
+	/** Read a completed checkpoint, never the mutable working tree and never a merge operation. */
+	public Review review(String threadId) throws IOException, InterruptedException {
+		JsonObject detail = thread(threadId, 4);
+		int turnCount = 0;
+		String replyId = null;
+		if (detail.has("checkpoints")) for (var item : detail.getAsJsonArray("checkpoints")) {
+			JsonObject checkpoint = item.getAsJsonObject();
+			if (checkpoint.has("status") && "ready".equals(checkpoint.get("status").getAsString())
+				&& checkpoint.get("checkpointTurnCount").getAsInt() > turnCount) {
+				turnCount = checkpoint.get("checkpointTurnCount").getAsInt();
+				replyId = checkpoint.has("assistantMessageId") && !checkpoint.get("assistantMessageId").isJsonNull()
+					? checkpoint.get("assistantMessageId").getAsString() : null;
+			}
+		}
+		if (turnCount == 0) throw new IOException("No completed checkpoint is available to review yet.");
+		JsonObject payload = new JsonObject();
+		payload.addProperty("threadId", threadId);
+		payload.addProperty("toTurnCount", turnCount);
+		T3Socket socket = openSocket(reason -> {});
+		try {
+			JsonObject result = socket.call("orchestration.getFullThreadDiff", payload, 20);
+			if (!threadId.equals(result.get("threadId").getAsString())) throw new IOException("T3 returned a diff for another thread.");
+			if (result.get("toTurnCount").getAsInt() != turnCount) throw new IOException("T3 returned a diff for another checkpoint.");
+			return new Review(threadId, detail.get("title").getAsString(), turnCount, checkpointReply(detail, replyId), result.get("diff").getAsString());
+		} finally { socket.close(); }
+	}
+
+	private static String checkpointReply(JsonObject detail, String replyId) {
+		if (replyId == null) return "No agent reply is recorded for this checkpoint.";
+		if (detail.has("messages")) for (var item : detail.getAsJsonArray("messages")) {
+			var message = item.getAsJsonObject();
+			if (replyId.equals(message.get("id").getAsString()) && "assistant".equals(message.get("role").getAsString())
+				&& message.has("text") && !message.get("text").isJsonNull()) return message.get("text").getAsString();
+		}
+		return "This checkpoint's reply is outside the recent history window. Its patch is available below.";
 	}
 
 	/** Sends a prompt to an existing thread, reusing its runtime and interaction modes. {@code model} null keeps the thread's model. */
@@ -215,7 +269,17 @@ public final class T3Api {
 	}
 
 	public void interrupt(String threadId) throws IOException, InterruptedException {
-		dispatch(command("thread.turn.interrupt", threadId));
+		JsonObject command = command("thread.turn.interrupt", threadId);
+		if (protocol2) {
+			String run = null;
+			for (var value : shell().getAsJsonArray("threads")) {
+				var row = value.getAsJsonObject();
+				if (threadId.equals(T3Protocol.string(row, "id"))) run = T3Protocol.string(row, "activeRunId");
+			}
+			if (run == null) throw new IOException("There is no active run to stop.");
+			command.addProperty("type", "run.interrupt"); command.addProperty("runId", run);
+		}
+		dispatch(command);
 	}
 
 	private static JsonObject turnStart(String threadId, JsonObject settings, String text, JsonObject model) {
@@ -242,6 +306,25 @@ public final class T3Api {
 	}
 
 	private void dispatch(JsonObject command) throws IOException, InterruptedException {
+		if (protocol2) {
+			JsonObject mapped = command.deepCopy(); mapped.remove("createdAt");
+			switch (command.get("type").getAsString()) {
+				case "thread.approval.respond", "thread.user-input.respond" -> mapped.addProperty("type", "runtime-request.respond");
+				case "thread.meta.update" -> mapped.addProperty("type", "thread.model-selection.set");
+				case "thread.create" -> { mapped.addProperty("createdBy", "user"); mapped.addProperty("creationSource", "web"); }
+				case "thread.turn.start" -> {
+					mapped.addProperty("createdBy", "user"); mapped.addProperty("creationSource", "web");
+					mapped.addProperty("type", "message.dispatch");
+					var message = mapped.remove("message").getAsJsonObject();
+					for (String key : new String[] {"messageId", "text", "attachments"}) mapped.add(key, message.get(key));
+					JsonObject mode = new JsonObject(); mode.addProperty("type", "start_immediately"); mapped.add("dispatchMode", mode);
+				}
+				default -> {}
+			}
+			T3Socket socket = openSocket(reason -> {});
+			try { socket.call("orchestration.dispatchCommand", mapped, 20); } finally { socket.close(); }
+			return;
+		}
 		send(authorized("/api/orchestration/dispatch")
 			.header("content-type", "application/json")
 			.POST(HttpRequest.BodyPublishers.ofString(command.toString()))
@@ -255,7 +338,8 @@ public final class T3Api {
 	private HttpRequest.Builder authorized(String path) {
 		return HttpRequest.newBuilder(URI.create(baseUrl + path))
 			.timeout(Duration.ofSeconds(20))
-			.header("authorization", "Bearer " + accessToken);
+			.header("authorization", "Bearer " + accessToken)
+			.header("x-t3-orchestration-protocol", "2");
 	}
 
 	private String send(HttpRequest request) throws IOException, InterruptedException {

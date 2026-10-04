@@ -42,3 +42,6 @@ run-server/
 # Extra local worlds (launcher profiles with T3CRAFT_SERVER_DIR)
 run-*/
 scripts/*.local
+
+# Plain-JVM integration check logs
+logs/

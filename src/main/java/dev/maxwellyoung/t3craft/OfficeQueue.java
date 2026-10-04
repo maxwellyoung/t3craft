@@ -34,7 +34,7 @@ final class OfficeQueue {
 	boolean hideFeedback(String message) {
 		boolean quiet = !queue.isEmpty() || System.currentTimeMillis() < quietUntil;
 		return quiet && (message.startsWith("Successfully filled") || message.startsWith("Changed the block")
-			|| message.startsWith("Could not set the block"));
+			|| message.startsWith("Could not set the block") || message.startsWith("No blocks were filled"));
 	}
 
 	void tick(Minecraft minecraft) {

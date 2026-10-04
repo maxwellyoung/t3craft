@@ -76,3 +76,24 @@ tasks.register('smoke', JavaExec) {
 	args = [project.findProperty('t3url') ?: '', project.findProperty('t3prompt') ?: '']
 	systemProperty 't3.newThread', project.findProperty('t3new') ?: 'false'
 }
+
+tasks.register('featureCheck', JavaExec) {
+	description = 'Decision routing and checkpoint review against scripts/feature-fixture.py (loopback only).'
+	classpath = sourceSets.smoke.runtimeClasspath
+	mainClass = 'dev.maxwellyoung.t3craft.FeatureChecks'
+	args = [project.findProperty('fixturePort') ?: '25680']
+}
+
+tasks.register('reviewProbe', JavaExec) {
+	description = 'Read-only diff compatibility check using an existing pairing file; no content is printed.'
+	classpath = sourceSets.smoke.runtimeClasspath
+	mainClass = 'dev.maxwellyoung.t3craft.ReviewProbe'
+	args = [project.findProperty('config') ?: 'run/config/t3craft.json']
+}
+
+tasks.register('liveCheck', JavaExec) {
+	description = 'Opt-in real-agent check in an explicitly supplied disposable project: -Pconfig=<pairing file> -PqaProject=<descriptor>.'
+	classpath = sourceSets.smoke.runtimeClasspath
+	mainClass = 'dev.maxwellyoung.t3craft.LiveChecks'
+	args = [project.findProperty('config') ?: 'run/config/t3craft.json', project.findProperty('qaProject') ?: '']
+}

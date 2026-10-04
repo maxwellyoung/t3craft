@@ -63,6 +63,22 @@ final class T3Village {
 			}
 		}
 
+
+		if (mod.officeMode() && minecraft.gui.screen() == null
+			&& minecraft.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit) {
+			BlockPos position = hit.getBlockPos();
+			int x = position.getX() - anchor.getX(), z = position.getZ() - anchor.getZ();
+			int floor = Math.floorDiv(position.getY() - anchor.getY(), T3Office.FLOOR_HEIGHT);
+			boolean board = x >= 1 && x <= 2 && z >= 27 && z <= 28;
+			boolean lectern = x == 12 && z == 19;
+			if (floor >= 0 && floor < Math.max(1, mod.floors().size()) && (board || lectern) && minecraft.options.keyUse.consumeClick()) {
+				while (minecraft.options.keyUse.consumeClick()) {}
+				if (board) mod.openDecisions();
+				else mod.openReview(mod.state().focusedThreadId());
+				return;
+			}
+		}
+
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		boolean office = mod.officeMode();
 		if (office && mod.office().building()) return;
@@ -148,7 +164,10 @@ final class T3Village {
 		}
 		// Each floor's whiteboard: who needs you and what for (only when it changes).
 		for (int floor = 0; floor < Math.max(1, floors.size()); floor++) {
-			List<T3Office.Note> notes = brain.notes(floor, id -> mod.state().waitingDetail(id));
+			String machine = floor < floors.size() ? floors.get(floor) : null;
+			List<T3Office.Note> notes = snapshot.threads().stream().filter(row -> row.status() == T3State.Status.NEEDS_YOU)
+				.filter(row -> row.environment() == null || row.environment().equals(machine))
+				.map(row -> new T3Office.Note(row.title(), mod.state().waitingDetail(row.id()))).toList();
 			String key = notes.toString();
 			if (!key.equals(boards.get(floor))) {
 				boards.put(floor, key);

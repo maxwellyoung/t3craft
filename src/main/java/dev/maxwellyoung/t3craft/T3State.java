@@ -78,13 +78,22 @@ public final class T3State {
 	private final Consumer<Event> onEvent;
 	// What waiting threads are asking (approval command or question), shown on the waiting villager.
 	private final Map<String, String> waitingDetails = new ConcurrentHashMap<>();
+	private final Map<String, JsonObject> waitingThreads = new HashMap<>();
+	private final Map<String, Long> waitingFetchedAt = new HashMap<>();
+	private volatile List<T3Decisions.Entry> decisions = List.of();
+	private volatile Map<String, Boolean> onlineThreads = Map.of();
+	private volatile List<String> offlineMachines = List.of();
+
+	List<T3Decisions.Entry> decisions() { return decisions; }
+	public boolean online(String threadId) { return onlineThreads.getOrDefault(threadId, false); }
+	List<String> offlineMachines() { return offlineMachines; }
 
 	/** One paired environment: its API, socket, and shell mirror. Owned by the executor thread. */
 	private static final class Env {
 		final T3Api api;
 		final String label;
 		final Map<String, String> projectTitles = new HashMap<>();
-		final Map<String, JsonObject> threads = new LinkedHashMap<>();
+		final Map<String, JsonObject> threads = new ConcurrentHashMap<>();
 		T3Socket socket;
 		boolean shellLive;
 		String threadRequest;
@@ -139,7 +148,7 @@ public final class T3State {
 		if (threadId != null) {
 			for (Env env : current) if (env.threads.containsKey(threadId)) return env;
 		}
-		return current.isEmpty() ? null : current.getFirst();
+		return threadId != null || current.isEmpty() ? null : current.getFirst();
 	}
 
 	/** True while every environment streams over its socket rather than being polled. */
@@ -178,6 +187,11 @@ public final class T3State {
 			lastStatus.clear();
 			lastTurn.clear();
 			seenApprovals.clear();
+			waitingDetails.clear();
+			waitingThreads.clear();
+			waitingFetchedAt.clear();
+			decisions = List.of();
+			onlineThreads = Map.of();
 			focusDetail = null;
 			List<Env> next = new ArrayList<>();
 			for (Connection connection : connections) next.add(new Env(connection.api(), connection.label()));
@@ -212,11 +226,15 @@ public final class T3State {
 		Env env = envFor(threadId);
 		if (env == null) return;
 		try {
-			Focus detail = focus(env.api.thread(threadId, 3));
+			JsonObject raw = env.api.thread(threadId, 4);
+			Focus detail = focus(raw);
+			waitingThreads.put(threadId, raw);
+			waitingFetchedAt.put(threadId, System.currentTimeMillis());
 			String text = !detail.approvals().isEmpty() ? detail.approvals().getFirst().detail()
 				: !detail.userInputs().isEmpty() ? detail.userInputs().getFirst().questions().getFirst().question() : "";
 			waitingDetails.put(threadId, text == null ? "" : text);
 		} catch (Exception e) {
+			env.error = "Could not refresh pending requests: " + e.getMessage();
 			T3Log.LOGGER.debug("Could not load what {} is waiting on", threadId, e);
 		}
 	}
@@ -255,6 +273,23 @@ public final class T3State {
 		});
 	}
 
+	public void respond(String threadId, String requestId, String decision, JsonObject answers, Consumer<Exception> onError) {
+		Env owner = envFor(threadId);
+		run(() -> {
+			if (owner == null || envFor(threadId) != owner || owner.error != null)
+				throw new java.io.IOException("This machine is offline or the thread is no longer paired. Refresh before answering.");
+			JsonObject raw = owner.api.thread(threadId, 4);
+			Focus current = focus(raw);
+			boolean pending = answers == null
+				? current.approvals().stream().anyMatch(a -> a.requestId().equals(requestId))
+				: current.userInputs().stream().anyMatch(a -> a.requestId().equals(requestId));
+			if (!pending) throw new java.io.IOException("That request has already changed or been answered. Open the current request.");
+			if (answers == null) owner.api.respondToApproval(threadId, requestId, decision);
+			else owner.api.answerQuestions(threadId, requestId, answers);
+			fetchWaitingDetail(threadId);
+		}, onError);
+	}
+
 	public interface IoAction {
 		void run() throws Exception;
 	}
@@ -275,7 +310,7 @@ public final class T3State {
 		for (Env env : current) {
 			try {
 				ensureSocket(env);
-				if (env.shellLive) {
+				if (env.shellLive && env.error == null) {
 					if (tick % 15 == 0) env.socket.ping();
 					syncThreadSubscription(env);
 					continue;
@@ -287,6 +322,16 @@ public final class T3State {
 			} catch (Exception e) {
 				env.error = e.getMessage();
 				changed = true;
+			}
+		}
+		if (panelOpen && tick % 5 == 0) {
+			for (ThreadRow row : allRows()) {
+				Env owner = envFor(row.id());
+				if (row.status() == Status.NEEDS_YOU && owner != null && owner.error == null
+					&& System.currentTimeMillis() - waitingFetchedAt.getOrDefault(row.id(), 0L) >= 4000) {
+					fetchWaitingDetail(row.id());
+					changed = true;
+				}
 			}
 		}
 		if (refreshSoon || changed) {
@@ -326,6 +371,8 @@ public final class T3State {
 		env.threadRequest = null;
 		env.threadRequestFor = null;
 		env.nextSocketAttempt = System.currentTimeMillis() + 2_000;
+		env.error = "Reconnecting…";
+		publish(List.of());
 	}
 
 	private void closeSocket(Env env) {
@@ -339,7 +386,14 @@ public final class T3State {
 	private void onShellItem(Env env, JsonObject item) {
 		switch (string(item, "kind")) {
 			case "snapshot" -> {
-				applyShellSnapshot(env, item.getAsJsonObject("snapshot"));
+				JsonObject shell = item.getAsJsonObject("snapshot");
+				// Repository metadata refreshes carry an empty thread list, not a replacement snapshot.
+				if (item.has("resolvedRepositoryIdentityRoots") && array(shell, "threads").isEmpty() && array(shell, "archivedThreads").isEmpty()) {
+					for (var value : array(shell, "projects")) {
+						JsonObject project = value.getAsJsonObject();
+						env.projectTitles.put(string(project, "id"), string(project, "title"));
+					}
+				} else applyShellSnapshot(env, env.api.adaptShell(shell));
 				publish(List.of());
 			}
 			case "synchronized" -> {
@@ -349,23 +403,28 @@ public final class T3State {
 				fetchFocus();
 				publishWithEvents();
 			}
-			case "project-upserted" -> {
+			case "project-upserted", "project.updated" -> {
 				JsonObject project = item.getAsJsonObject("project");
 				env.projectTitles.put(string(project, "id"), string(project, "title"));
 				publish(List.of());
 			}
-			case "project-removed" -> {
+			case "project-removed", "project.removed" -> {
 				env.projectTitles.remove(string(item, "projectId"));
 				publish(List.of());
 			}
-			case "thread-upserted" -> {
-				JsonObject thread = item.getAsJsonObject("thread");
+			case "thread-upserted", "thread.updated" -> {
+				JsonObject thread = env.api.adaptShellThread(item.getAsJsonObject("thread"));
+				if ("archive".equals(string(item, "location"))) {
+					env.threads.remove(string(thread, "id"));
+					publishWithEvents();
+					return;
+				}
 				env.threads.put(string(thread, "id"), thread);
 				// Refetch before announcing, so a "needs you" ping already carries the approval.
 				if (string(thread, "id").equals(focusedThreadId)) fetchFocus();
 				publishWithEvents();
 			}
-			case "thread-removed" -> {
+			case "thread-removed", "thread.removed" -> {
 				env.threads.remove(string(item, "threadId"));
 				publishWithEvents();
 			}
@@ -409,7 +468,9 @@ public final class T3State {
 			return;
 		}
 		try {
-			focusDetail = focus(env.api.thread(threadId, 4));
+			JsonObject raw = env.api.thread(threadId, 4);
+			focusDetail = focus(raw);
+			waitingThreads.put(threadId, raw);
 		} catch (Exception e) {
 			env.error = e.getMessage();
 		}
@@ -448,9 +509,11 @@ public final class T3State {
 			if (row.status() == Status.NEEDS_YOU && (before != Status.NEEDS_YOU || !waitingDetails.containsKey(row.id()))) {
 				waitingDetails.put(row.id(), ""); // pending; the fetch fills it in
 				String id = row.id();
-				executor.execute(() -> fetchWaitingDetail(id));
+				executor.execute(() -> { fetchWaitingDetail(id); publish(List.of()); });
 			} else if (row.status() != Status.NEEDS_YOU) {
 				waitingDetails.remove(row.id());
+				waitingThreads.remove(row.id());
+				waitingFetchedAt.remove(row.id());
 			}
 			String turn = turnId(row.raw());
 			String turnBefore = lastTurn.put(row.id(), turn);
@@ -490,6 +553,12 @@ public final class T3State {
 		boolean connected = current.stream().anyMatch(env -> env.error == null && (env.shellLive || !env.threads.isEmpty()));
 		String error = current.stream().filter(env -> env.error != null)
 			.map(env -> (current.size() > 1 ? env.label + ": " : "") + env.error).reduce((a, b) -> a + " · " + b).orElse(null);
+		Map<String, Boolean> health = new HashMap<>();
+		for (Env env : current) for (String id : env.threads.keySet()) health.put(id, env.error == null);
+		onlineThreads = Map.copyOf(health);
+		offlineMachines = current.stream().filter(env -> env.error != null || env.threads.isEmpty() && !env.shellLive)
+			.map(env -> env.label).toList();
+		decisions = T3Decisions.collect(rows, waitingThreads);
 		snapshot = new Snapshot(connected, error, List.copyOf(visible.values()), focusedThreadId, focus);
 		events.forEach(onEvent);
 	}
@@ -519,7 +588,7 @@ public final class T3State {
 			projectTitles.getOrDefault(string(thread, "projectId"), "?"), environment, status, since, step, thread);
 	}
 
-	private static Focus focus(JsonObject thread) {
+	static Focus focus(JsonObject thread) {
 		List<Message> messages = new ArrayList<>();
 		for (JsonElement element : array(thread, "messages")) {
 			JsonObject message = element.getAsJsonObject();

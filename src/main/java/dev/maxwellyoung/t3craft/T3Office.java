@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Suite 408: the long loft from the photos, one floor per paired machine, and where the agent
+ * A long loft with one floor per paired machine, and where the agent
  * villagers go inside it. Pure layout (no client or server classes) so the client village and the
  * shared server office both use it.
  *
@@ -97,6 +97,7 @@ final class T3Office {
 		mark(b, 13, 20, 13, 21); mark(b, 12, 21, 12, 21); mark(b, 13, 23, 13, 23); mark(b, 13, 27, 13, 27); mark(b, 12, 28, 12, 28);
 		// Sofa, basket, beanbags, whiteboard, curtains.
 		mark(b, 3, 24, 10, 25); mark(b, 2, 25, 2, 25); mark(b, 5, 28, 6, 29); mark(b, 8, 28, 9, 29); mark(b, 1, 27, 1, 28);
+		mark(b, 12, 19, 12, 19); // review lectern
 		mark(b, 0, 29, 0, 29); mark(b, 13, 29, 13, 29);
 		blocked = b;
 		return b;
@@ -277,6 +278,7 @@ final class T3Office {
 		c.add("fill 8 " + y0 + " 28 9 " + y0 + " 29 light_gray_wool");
 		c.add("fill 1 " + y0 + " 27 1 " + y0 + " 28 iron_bars");
 		c.add("fill 1 " + (y0 + 1) + " 27 1 " + (y0 + 3) + " 28 white_concrete");
+		c.add("setblock 12 " + y0 + " 19 lectern[facing=west]");
 		return c;
 	}
 

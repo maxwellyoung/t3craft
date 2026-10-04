@@ -59,6 +59,7 @@ final class T3Mcp {
 				return thread;
 			}));
 			server.start();
+			net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STOPPING.register(client -> server.stop(0));
 			T3CraftClient.LOGGER.info("Minecraft MCP server on http://127.0.0.1:{}/mcp", PORT);
 		} catch (IOException e) {
 			T3CraftClient.LOGGER.warn("Could not start the Minecraft MCP server on port {}", PORT, e);

@@ -8,7 +8,7 @@
 
 It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3 environments the same way the mobile app does, so it works on any server, and prompts never go through server chat. Installed on a dedicated server as well, it can also run a shared village that everyone on the server sees.
 
-> **Early prototype.** Tested end to end in the Fabric dev client against T3 Code nightly `0.0.43`. It uses T3's client protocol, which is not a documented public API and may change.
+> **Early prototype.** Validated against T3 Code nightly `0.0.46-nightly.20261003.2638`, including a real agent edit, approvals and checkpoint retrieval. It uses T3's client protocol, which is not a documented public API and may change.
 
 ## What it does
 
@@ -23,7 +23,19 @@ It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3
 
 ![Approving a command from inside the game](docs/approval.jpg)
 
-Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 threads` · `/t3 use <n>` · `/t3 ask <prompt>` · `/t3 new <prompt>` · `/t3 approve` · `/t3 deny` · `/t3 stop` · `/t3 village [off]` · `/t3 books on|off` · `/t3 agent-build on|off`
+Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 decisions` · `/t3 review` · `/t3 threads` · `/t3 use <n>` · `/t3 ask <prompt>` · `/t3 new <prompt>` · `/t3 approve` · `/t3 deny` · `/t3 stop` · `/t3 village [off]` · `/t3 books on|off` · `/t3 agent-build on|off`
+
+## Office
+
+`/t3 office` builds an agent office with one floor per paired machine. Residents work at their desks, wait at the whiteboard for decisions, and return to the lounge when finished. The whiteboard and review lectern open the decision and checkpoint screens. Each world remembers its office location; rebuilding changes blocks and requires command permission. `/t3 office off` disables the office view. A dedicated server can pair with `/t3village pair <link>` and build its shared office with `/t3office build`.
+
+## Decision desk and checkpoint review (0.2.0)
+
+Press **J**, run `/t3 decisions`, or right-click the office whiteboard to see pending approvals and questions across every paired machine. The queue includes older threads beyond the office's eight residents per floor. It shows the machine, project, request and age; opening a row targets that exact request. Responses are rechecked against current T3 state before dispatch. Offline machines retain their last-known requests with answering disabled.
+
+Use **Review** in the thread header, `/t3 review`, or the office lectern to inspect the latest ready checkpoint. Choose a file for its complete Git patch, including deletions, rename metadata and binary-file notices. Arrow keys scroll or pan; **Home** resets the view and **F5** refreshes. The displayed agent reply is matched to the checkpoint; if it falls outside recent history the screen says so. **Give feedback** opens that thread's composer and preserves any existing unsent draft. This screen does not apply or merge changes, and does not imply tests passed.
+
+Tested against legacy and protocol 2 fixtures, plus the installed T3 Code nightly with live streams, a real agent edit, approvals and checkpoint retrieval. The client sends the required protocol 2 header, adapts run projections and uses RPC dispatch on current nightlies. Older servers retain their HTTP dispatch path.
 
 ## Install and pair
 
@@ -47,7 +59,7 @@ Set up T3 Craft (https://github.com/maxwellyoung/t3craft) on this machine so I c
 
 Or by hand:
 
-1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.1.4.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
+1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.2.0.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
 3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
 
@@ -108,7 +120,7 @@ For a second world with its own app, give it its own profile and server folder (
 Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).
 
 ```sh
-./gradlew build                     # → build/libs/t3craft-0.1.4.jar
+./gradlew build                     # → build/libs/t3craft-0.2.0.jar
 ./gradlew runServer --args=nogui    # local offline test server in run-server/ (set white-list=false)
 ./gradlew runClient                 # dev client
 ```
@@ -134,6 +146,30 @@ Checks:
 - **Live updates:** a WebSocket (one-time ticket) subscribes to `orchestration.subscribeShell` for thread status. Events from `orchestration.subscribeThread` on the focused thread trigger a refetch of its recent turns, at most four times a second.
 - **Notifications:** only the focused thread and threads you prompted from Minecraft notify you. Each new approval or question pings once.
 - **Model list:** comes from `server.getConfig` over the same socket.
+
+## Focused development checks
+
+Start the isolated fixtures in one terminal:
+
+```sh
+python3 scripts/feature-fixture.py --config "$PWD/run/feature-fixture.json"
+```
+
+Then run `./gradlew featureCheck`. It exercises two-machine routing, older waiting threads, stale requests, disconnect/reconnect, checkpoint reply identity, and deleted/binary/renamed/empty patches. It never uses a real pairing or dispatches to an agent. Run the fixture with `--protocol2 --port 25682`, then `./gradlew featureCheck -PfixturePort=25682`, to exercise current T3 wire shapes. CI checks both protocols.
+
+For the game walkthrough, use a disposable creative dev server with `Player` opped. Reset both fixtures after the Java checks, then join that server:
+
+```sh
+curl -fsS http://127.0.0.1:25680/_qa/reset
+curl -fsS http://127.0.0.1:25681/_qa/reset
+./gradlew runClient -Pselftest=desk-review -Pjoin=localhost:25690 -Pconfig="$PWD/run/feature-fixture.json"
+```
+
+The walkthrough builds an office in that test world, enters through the whiteboard, approves only the fixture request, opens the lectern, clicks both patch files and checks the unsent feedback draft. It saves framebuffer screenshots in `run/screenshots/` and logs `SELFTEST RESULT PASS` before quitting. Use a disposable world: the build changes blocks.
+
+`./gradlew reviewProbe -Pconfig=<existing-local-config>` is a read-only compatibility probe against a saved pairing. It prints checkpoint/file counts without credentials or file content and sends no agent commands.
+
+`./gradlew liveCheck -Pconfig=<existing-local-config> -PqaProject=<descriptor>` is opt-in and calls a real agent. Supply a disposable Git project containing `greeting.txt` (`hello` plus a newline) and `obsolete.txt`; the descriptor has `projectId` and `workspaceRoot`. It creates a new QA thread, approves only that thread's requests, and verifies the edit, deletion, live streams and checkpoint. It does not commit or push the QA repository.
 
 ## License and disclaimer
 

@@ -37,6 +37,9 @@ final class T3Screen extends Screen {
 	private Button approve;
 	private Button deny;
 	private Button stop;
+	private Button review;
+	private String selectedRequest;
+	private T3State.Focus shownFocus;
 	private boolean newThread;
 	private int scroll;
 	/** Machine shown in the sidebar; null means all of them. */
@@ -60,9 +63,12 @@ final class T3Screen extends Screen {
 	private int cachedWidth;
 	private List<T3Markdown.Line> cachedLines = List.of();
 
-	T3Screen(T3CraftClient mod) {
+	T3Screen(T3CraftClient mod) { this(mod, null); }
+
+	T3Screen(T3CraftClient mod, String selectedRequest) {
 		super(Component.literal("T3"));
 		this.mod = mod;
+		this.selectedRequest = selectedRequest;
 	}
 
 	@Override
@@ -87,6 +93,10 @@ final class T3Screen extends Screen {
 			.bounds(mainX + mainWidth - 66, approvalY + 2, 60, 14).build());
 		stop = addRenderableWidget(Button.builder(Component.literal("Stop"), b -> mod.interrupt())
 			.bounds(width - MARGIN - 44, MARGIN + 3, 44, 18).build());
+		review = addRenderableWidget(Button.builder(Component.literal("Review"), b -> { if (shownFocus != null) mod.openReview(shownFocus.threadId()); })
+			.bounds(width - MARGIN - 102, MARGIN + 3, 54, 18).build());
+		addRenderableWidget(Button.builder(Component.literal("Decisions (J)"), b -> mod.openDecisions())
+			.bounds(MARGIN + 5, height - MARGIN - 25, SIDEBAR - 10, 18).build());
 		syncWidgets(mod.state().snapshot());
 		revealFocused();
 	}
@@ -128,7 +138,11 @@ final class T3Screen extends Screen {
 	}
 
 	private void syncWidgets(T3State.Snapshot snapshot) {
-		boolean hasApproval = snapshot.focus() != null && !snapshot.focus().approvals().isEmpty();
+		boolean hasApproval = currentApproval() != null;
+		boolean online = mod.state().online(snapshot.focusedId());
+		approve.active = deny.active = online;
+		review.active = snapshot.focusedRow() != null && online;
+		stop.active = online;
 		approve.visible = deny.visible = hasApproval;
 		T3State.ThreadRow row = snapshot.focusedRow();
 		stop.visible = row != null && row.status() == T3State.Status.WORKING;
@@ -158,7 +172,7 @@ final class T3Screen extends Screen {
 	}
 
 	private int visibleRows() {
-		return Math.max(1, (height - MARGIN - listTop()) / ROW);
+		return Math.max(1, (height - MARGIN - 28 - listTop()) / ROW);
 	}
 
 	private void clampSidebarScroll(int total) {
@@ -183,17 +197,28 @@ final class T3Screen extends Screen {
 		composer.setHint(Component.literal(hint).withColor(0xFF6B7280));
 	}
 
+
+	private T3State.Approval currentApproval() {
+		var focus = shownFocus;
+		if (focus == null || focus.approvals().isEmpty()) return null;
+		return selectedRequest == null ? focus.approvals().getFirst()
+			: focus.approvals().stream().filter(a -> a.requestId().equals(selectedRequest)).findFirst().orElse(null);
+	}
+
 	private void answer(String decision) {
-		T3State.Focus focus = mod.state().snapshot().focus();
-		if (focus != null && !focus.approvals().isEmpty()) mod.respond(focus.approvals().getFirst(), decision);
+		T3State.Focus focus = shownFocus;
+		T3State.Approval approval = currentApproval();
+		if (approval != null && mod.state().online(focus.threadId())) mod.respond(focus.threadId(), approval, decision);
 	}
 
 	private T3State.UserInput currentInput() {
-		T3State.Focus focus = mod.state().snapshot().focus();
-		if (focus == null || focus.userInputs().isEmpty()) return null;
-		T3State.UserInput input = focus.userInputs().getFirst();
-		if (!input.requestId().equals(answeringRequest)) {
-			answeringRequest = input.requestId();
+		T3State.Focus focus = shownFocus;
+		if (focus == null || focus.userInputs().isEmpty() || !mod.state().online(focus.threadId())) return null;
+		T3State.UserInput input = selectedRequest == null ? focus.userInputs().getFirst()
+			: focus.userInputs().stream().filter(i -> i.requestId().equals(selectedRequest)).findFirst().orElse(null);
+		if (input == null) return null;
+		if (!(focus.threadId() + ":" + input.requestId()).equals(answeringRequest)) {
+			answeringRequest = focus.threadId() + ":" + input.requestId();
 			questionIndex = 0;
 			answers = new JsonObject();
 			multiPicked.clear();
@@ -215,7 +240,7 @@ final class T3Screen extends Screen {
 		multiPicked.clear();
 		questionIndex++;
 		if (questionIndex >= input.questions().size()) {
-			mod.answer(input, answers);
+			mod.answer(shownFocus.threadId(), input, answers);
 			answeringRequest = null;
 		}
 		updateHint();
@@ -403,11 +428,13 @@ final class T3Screen extends Screen {
 			sidebarScroll = 0;
 			return true;
 		}
-		if (event.x() >= MARGIN && event.x() < MARGIN + SIDEBAR && event.y() >= listTop) {
+		if (event.x() >= MARGIN && event.x() < MARGIN + SIDEBAR && event.y() >= listTop
+			&& event.y() < listTop + visibleRows() * ROW) {
 			int index = (int) ((event.y() - listTop) / ROW) + sidebarScroll;
 			if (index < rows.size()) {
 				mod.saveDraft(draftKey(), composer.getValue());
 				mod.focus(rows.get(index).id());
+				selectedRequest = null;
 				newThread = false;
 				composer.setValue(mod.draft(draftKey()));
 				pickedModel = null;
@@ -445,6 +472,7 @@ final class T3Screen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
 		T3State.Snapshot snapshot = mod.state().snapshot();
+		shownFocus = snapshot.focus();
 		mouseXCache = mouseX;
 		mouseYCache = mouseY;
 		extractSidebar(graphics, snapshot, mouseX, mouseY);
@@ -530,14 +558,14 @@ final class T3Screen extends Screen {
 
 		String title = newThread ? "New thread" : row.title();
 		graphics.text(font, T3Hud.ellipsize(font, title, chipX() - x0 - 20), x0 + 10, MARGIN + 6, 0xFFFFFFFF, false);
-		String status = T3Hud.label(row.status());
+		String status = mod.state().online(row.id()) ? T3Hud.label(row.status()) : "Offline · last-known status";
 		if (row.status() == T3State.Status.WORKING) status += " " + T3Hud.elapsed(row.workingSince()) + (row.step() == null ? "" : " · " + row.step());
 		String meta = (row.environment() == null ? "" : row.environment() + " · ") + row.projectTitle() + " · ";
 		graphics.text(font, meta, x0 + 10, MARGIN + 16, 0xFF6B7280, false);
 		graphics.text(font, T3Hud.ellipsize(font, status, chipX() - x0 - 20 - font.width(meta)), x0 + 10 + font.width(meta), MARGIN + 16, T3Hud.color(row.status()), false);
 		graphics.horizontalLine(x0, x1 - 1, MARGIN + HEADER, 0x30FFFFFF);
 
-		boolean hasApproval = focus != null && !focus.approvals().isEmpty();
+		boolean hasApproval = currentApproval() != null;
 		int composerY = height - MARGIN - 12 - COMPOSER;
 		T3State.Question question = newThread ? null : currentQuestion();
 		int questionHeight = question == null ? 0 : questionCardHeight(question, x1 - x0 - 24);
@@ -577,7 +605,7 @@ final class T3Screen extends Screen {
 			extractQuestion(graphics, question, x0, x1, composerY - (hasApproval ? APPROVAL : 0) - questionHeight - 2, mouseXCache, mouseYCache);
 		}
 		if (hasApproval) {
-			T3State.Approval approval = focus.approvals().getFirst();
+			T3State.Approval approval = currentApproval();
 			int y = composerY - APPROVAL - 2;
 			graphics.fill(x0 + 6, y, x1 - 6, y + APPROVAL - 2, 0x40FFB02E);
 			graphics.text(font, "Approve " + approval.kind() + "?", x0 + 12, y + 5, 0xFFFFB02E, false);
@@ -662,7 +690,7 @@ final class T3Screen extends Screen {
 
 	// The chip's right edge stays put whether or not Stop is showing.
 	private int chipRight() {
-		return width - MARGIN - 52;
+		return width - MARGIN - 110;
 	}
 
 	private int chipX() {

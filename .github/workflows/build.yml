@@ -15,7 +15,15 @@ jobs:
           distribution: temurin
           java-version: 25
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew build
+      - name: Build and check both T3 protocols
+        run: |
+          python3 scripts/feature-fixture.py &
+          fixture_legacy_pid=$!
+          python3 scripts/feature-fixture.py --protocol2 --port 25682 &
+          fixture_v2_pid=$!
+          trap 'kill "$fixture_legacy_pid" "$fixture_v2_pid"' EXIT
+          ./gradlew featureCheck build
+          ./gradlew featureCheck -PfixturePort=25682
       - uses: actions/upload-artifact@v4
         with:
           name: t3craft-jar

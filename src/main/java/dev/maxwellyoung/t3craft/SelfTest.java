@@ -14,7 +14,7 @@ import net.minecraft.world.entity.npc.villager.Villager;
  * {@code shared:<link>} pairs and places the dev server's shared village. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { RELEASE_SITE, RELEASE_OPEN, RELEASE_CHECK, RELEASE_FEEDBACK, DESK_SITE, DESK_OPEN, DESK_REQUEST, DESK_ANSWERED, DESK_REVIEW_OPEN, DESK_REVIEW, DESK_DIFF, DESK_FEEDBACK, DESK_SIDEBAR, SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
@@ -52,12 +52,150 @@ final class SelfTest {
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		T3State.ThreadRow row = snapshot.focusedRow();
 		switch (step) {
+
+			case RELEASE_SITE -> {
+				if (mod.office().building() || ticks < 240) return;
+				var o = mod.villageAnchor();
+				if (ticks == 240) view(minecraft, o, 10, 0, 19.5, 12.5, 0.8, 19.5);
+				if (ticks == 270) minecraft.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES,
+					new net.minecraft.world.phys.Vec3(o.getX() + 12.5, o.getY() + 0.8, o.getZ() + 19.5));
+				if (ticks < 280) return;
+				net.minecraft.client.KeyMapping.click(minecraft.options.keyUse.getDefaultKey());
+				advance(Step.RELEASE_OPEN, "opening packaged review through the lectern");
+			}
+			case RELEASE_OPEN -> {
+				if (ticks < 40) return;
+				if (!(minecraft.gui.screen() instanceof T3ReviewScreen screen)) { finish(minecraft, "FAIL packaged lectern entry"); return; }
+				if (screen.reviewForTest() == null) return;
+				if (screen.filesForTest().size() != 2 || !screen.reviewForTest().diff().contains("+hello, Minecraft")) {
+					finish(minecraft, "FAIL packaged live checkpoint patch"); return;
+				}
+				screen.mouseClicked(new net.minecraft.client.input.MouseButtonEvent(30, 85,
+					new net.minecraft.client.input.MouseButtonInfo(com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 0)), false);
+				advance(Step.RELEASE_CHECK, "real T3 checkpoint loaded in the packaged client");
+			}
+			case RELEASE_CHECK -> {
+				if (ticks < 30 || !(minecraft.gui.screen() instanceof T3ReviewScreen screen)) return;
+				shot(minecraft, "release-live-checkpoint");
+				mod.saveDraft(snapshot.focusedId(), "Release QA notes");
+				screen.mouseClicked(new net.minecraft.client.input.MouseButtonEvent(screen.width - 77, screen.height - 20,
+					new net.minecraft.client.input.MouseButtonInfo(com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 0)), false);
+				advance(Step.RELEASE_FEEDBACK, "returning from packaged review to the composer");
+			}
+			case RELEASE_FEEDBACK -> {
+				if (ticks < 30) return;
+				if (!(minecraft.gui.screen() instanceof T3Screen screen) || !"Release QA notes".equals(screen.composerValueForTest())) {
+					finish(minecraft, "FAIL packaged feedback draft"); return;
+				}
+				finish(minecraft, "PASS packaged release: live T3 connection, lectern entry, real checkpoint patch and preserved feedback draft");
+			}
+
+			case DESK_SITE -> {
+				if (mod.office().building() || ticks < 240) return;
+				var o = mod.villageAnchor();
+				if (ticks == 240) view(minecraft, o, 4.5, 1.1, 27.5, 2.5, 3.4, 27.5);
+				if (ticks < 280) return;
+				shot(minecraft, "decision-whiteboard");
+				net.minecraft.client.KeyMapping.click(minecraft.options.keyUse.getDefaultKey());
+				advance(Step.DESK_OPEN, "right-clicking the decision whiteboard");
+			}
+			case DESK_OPEN -> {
+				if (ticks < 40) return;
+				if (!(minecraft.gui.screen() instanceof T3DeskScreen screen)) {
+					finish(minecraft, "FAIL whiteboard did not open decision desk"); return;
+				}
+				if (mod.state().decisions().stream().filter(e -> e.requestId() != null).count() != 2) {
+					finish(minecraft, "FAIL two-machine decisions not loaded"); return;
+				}
+				shot(minecraft, "decision-desk");
+				screen.keyPressed(new net.minecraft.client.input.KeyEvent(com.mojang.blaze3d.platform.InputConstants.KEY_RETURN, 0, 0));
+				advance(Step.DESK_REQUEST, "opening oldest request beyond eight visible residents");
+			}
+			case DESK_REQUEST -> {
+				if (ticks < 40 || snapshot.focus() == null) return;
+				if (!(minecraft.gui.screen() instanceof T3Screen screen) || !"A-waiting".equals(snapshot.focus().threadId())) {
+					finish(minecraft, "FAIL decision targeted another thread"); return;
+				}
+				shot(minecraft, "decision-request");
+				screen.keyPressed(new net.minecraft.client.input.KeyEvent(com.mojang.blaze3d.platform.InputConstants.KEY_Y, 0, 0));
+				advance(Step.DESK_ANSWERED, "answering the fixture approval through Y");
+			}
+			case DESK_ANSWERED -> {
+				if (ticks < 40) return;
+				if (mod.state().decisions().stream().anyMatch(e -> e.thread().id().equals("A-waiting") && e.requestId() != null)) return;
+				if (mod.state().decisions().stream().noneMatch(e -> e.thread().id().equals("B-waiting") && e.requestId() != null)) {
+					finish(minecraft, "FAIL answering A removed B's question"); return;
+				}
+				minecraft.gui.setScreen(null);
+				mod.focus("A-done-0");
+				var o = mod.villageAnchor();
+				view(minecraft, o, 10.0, 0.0, 19.5, 12.5, 0.8, 19.5);
+				advance(Step.DESK_REVIEW_OPEN, "one decision remains; aiming at review lectern");
+			}
+			case DESK_REVIEW_OPEN -> {
+				if (ticks == 30) {
+					var o = mod.villageAnchor();
+					minecraft.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES,
+						new net.minecraft.world.phys.Vec3(o.getX() + 12.5, o.getY() + 0.8, o.getZ() + 19.5));
+				}
+				if (ticks < 40) return;
+				shot(minecraft, "review-lectern");
+				T3CraftClient.LOGGER.info("SELFTEST lectern hit {}", minecraft.hitResult);
+				net.minecraft.client.KeyMapping.click(minecraft.options.keyUse.getDefaultKey());
+				advance(Step.DESK_REVIEW, "right-clicking review lectern");
+			}
+			case DESK_REVIEW -> {
+				if (ticks < 40) return;
+				if (!(minecraft.gui.screen() instanceof T3ReviewScreen screen)) {
+					finish(minecraft, "FAIL lectern did not open checkpoint review"); return;
+				}
+				if (screen.reviewForTest() == null) return;
+				if (screen.filesForTest().size() != 2) { finish(minecraft, "FAIL checkpoint file list"); return; }
+				shot(minecraft, "checkpoint-reply");
+				screen.mouseClicked(new net.minecraft.client.input.MouseButtonEvent(30, 85, new net.minecraft.client.input.MouseButtonInfo(com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 0)), false);
+				advance(Step.DESK_DIFF, "completed checkpoint loaded through RPC");
+			}
+			case DESK_DIFF -> {
+				if (ticks == 30) shot(minecraft, "checkpoint-diff");
+				if (ticks == 40 && minecraft.gui.screen() instanceof T3ReviewScreen screen) screen.mouseClicked(new net.minecraft.client.input.MouseButtonEvent(30, 105, new net.minecraft.client.input.MouseButtonInfo(com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 0)), false);
+				if (ticks == 70) shot(minecraft, "checkpoint-deleted-file");
+				if (ticks >= 80 && minecraft.gui.screen() instanceof T3ReviewScreen screen) {
+					mod.saveDraft("A-done-0", "Unsent review notes");
+					screen.mouseClicked(new net.minecraft.client.input.MouseButtonEvent(screen.width - 77, screen.height - 20,
+						new net.minecraft.client.input.MouseButtonInfo(com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 0)), false);
+					advance(Step.DESK_FEEDBACK, "returning to the composer with an existing draft");
+				}
+			}
+
+			case DESK_FEEDBACK -> {
+				if (ticks < 30) return;
+				if (!(minecraft.gui.screen() instanceof T3Screen screen) || !"A-done-0".equals(snapshot.focusedId())
+					|| !"Unsent review notes".equals(screen.composerValueForTest())) {
+					finish(minecraft, "FAIL feedback did not preserve the correct thread's draft"); return;
+				}
+				shot(minecraft, "checkpoint-feedback-draft");
+				screen.mouseClicked(new net.minecraft.client.input.MouseButtonEvent(50, screen.height - 25,
+					new net.minecraft.client.input.MouseButtonInfo(com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 0)), false);
+				advance(Step.DESK_SIDEBAR, "opening Decisions below a long sidebar");
+			}
+
+			case DESK_SIDEBAR -> {
+				if (ticks < 20) return;
+				if (!(minecraft.gui.screen() instanceof T3DeskScreen) || mod.state().decisions().size() != 1
+					|| !"B-waiting".equals(mod.state().decisions().getFirst().thread().id())) {
+					finish(minecraft, "FAIL sidebar decision button or resolved queue"); return;
+				}
+				shot(minecraft, "decision-one-remaining");
+				finish(minecraft, "PASS decision desk and checkpoint review: whiteboard, exact approval, preserved second-machine question, lectern, patch file clicks, deleted file, unsent feedback draft and sidebar decision button");
+			}
+
 			case SILK_WORLD -> {
 				if (ticks == 40) {
-					// Spawn where the player stands, facing south toward the door (yaw 0).
+					// The office goes just south of here; spawn is ten blocks further back, facing the facade (yaw 0 = south).
 					minecraft.player.connection.sendCommand("tp @s ~ ~ ~ 0 0");
-					minecraft.player.connection.sendCommand("setworldspawn ~ ~ ~ 0");
 					mod.buildOffice();
+					minecraft.player.connection.sendCommand("setworldspawn ~ ~ ~-10 0 0");
+					minecraft.player.connection.sendCommand("tp @s ~ ~ ~-10 0 -12");
 					built = false;
 				}
 				if (ticks <= 45) return;
@@ -521,6 +659,16 @@ final class SelfTest {
 					snapshot.threads().stream().filter(t -> t.title().toLowerCase().contains(wanted.toLowerCase()))
 						.findFirst().ifPresent(t -> mod.focus(t.id()));
 				}
+
+				if ("desk-review".equals(prompt) || "release-review".equals(prompt)) {
+					minecraft.player.connection.sendCommand("gamemode creative");
+					minecraft.player.connection.sendCommand("time set day");
+					minecraft.player.connection.sendCommand("weather clear");
+					mod.buildOffice();
+					advance("release-review".equals(prompt) ? Step.RELEASE_SITE : Step.DESK_SITE, "building in the isolated QA world");
+					return;
+				}
+
 				if ("threads".equals(prompt)) {
 					// Focus the oldest thread first, so opening has to scroll to reveal it.
 					mod.focus(snapshot.threads().getLast().id());

@@ -47,6 +47,7 @@ public final class T3CraftClient implements ClientModInitializer {
 	private T3Config config;
 	private T3State state;
 	private KeyMapping openKey;
+	private KeyMapping decisionsKey;
 	private boolean openPanelNextTick;
 	private String lastPingThread;
 	private long lastPingAt;
@@ -76,6 +77,8 @@ public final class T3CraftClient implements ClientModInitializer {
 		KeyMapping.Category category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MOD_ID, "main"));
 		openKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.t3craft.open", InputConstants.KEY_GRAVE, category));
 
+		decisionsKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.t3craft.decisions", InputConstants.KEY_J, category));
+
 		new T3Mcp(() -> config.agentCommands).start();
 		village = new T3Village(this);
 		ClientTickEvents.START_CLIENT_TICK.register(village::tick);
@@ -86,6 +89,7 @@ public final class T3CraftClient implements ClientModInitializer {
 		SelfTest selfTest = SelfTest.fromSystemProperty(this);
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			if (selfTest != null) selfTest.tick(client);
+			while (decisionsKey.consumeClick()) if (client.gui.screen() == null) openDecisions();
 			while (openKey.consumeClick()) {
 				openPanelNextTick = true;
 				// Answering a ping: open the thread that pinged, not whatever was focused before.
@@ -201,6 +205,21 @@ public final class T3CraftClient implements ClientModInitializer {
 		minecraft.gui.setScreen(new T3Screen(this));
 	}
 
+
+	void openDecisions() {
+		if (paired()) Minecraft.getInstance().gui.setScreen(new T3DeskScreen(this));
+		else openPanel();
+	}
+
+	void openRequest(T3Decisions.Entry entry) {
+		focus(entry.thread().id());
+		Minecraft.getInstance().gui.setScreen(new T3Screen(this, entry.requestId()));
+	}
+
+	void openReview(String threadId) {
+		if (threadId != null) Minecraft.getInstance().gui.setScreen(new T3ReviewScreen(this, threadId));
+	}
+
 	/** Remembers the focused thread across sessions. */
 	public void focus(String threadId) {
 		state.focus(threadId);
@@ -239,15 +258,21 @@ public final class T3CraftClient implements ClientModInitializer {
 	}
 
 	public void respond(T3State.Approval approval, String decision) {
-		String threadId = state.focusedThreadId();
-		T3Api api = state.api();
-		state.run(() -> api.respondToApproval(threadId, approval.requestId(), decision), this::reportError);
+		var focus = state.snapshot().focus();
+		if (focus != null) respond(focus.threadId(), approval, decision);
+	}
+
+	void respond(String threadId, T3State.Approval approval, String decision) {
+		state.respond(threadId, approval.requestId(), decision, null, this::reportError);
 	}
 
 	public void answer(T3State.UserInput input, com.google.gson.JsonObject answers) {
-		String threadId = state.focusedThreadId();
-		T3Api api = state.api();
-		state.run(() -> api.answerQuestions(threadId, input.requestId(), answers), this::reportError);
+		var focus = state.snapshot().focus();
+		if (focus != null) answer(focus.threadId(), input, answers);
+	}
+
+	void answer(String threadId, T3State.UserInput input, com.google.gson.JsonObject answers) {
+		state.respond(threadId, input.requestId(), null, answers.deepCopy(), this::reportError);
 	}
 
 	/** Unsent composer text per thread ("new" for a new thread), so switching threads never loses a draft. */
@@ -340,6 +365,8 @@ public final class T3CraftClient implements ClientModInitializer {
 				return 1;
 			}))
 			.then(literal("threads").executes(ctx -> listThreads()))
+			.then(literal("decisions").executes(ctx -> { openDecisions(); return 1; }))
+			.then(literal("review").executes(ctx -> { openReview(state.focusedThreadId()); return 1; }))
 			.then(literal("agent-build")
 				.then(literal("on").executes(ctx -> setAgentCommands(true)))
 				.then(literal("off").executes(ctx -> setAgentCommands(false))))
