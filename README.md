@@ -1,8 +1,10 @@
 # T3 Craft
 
-[T3 Code](https://t3.codes) inside Minecraft. Send a prompt, go back to mining, and get pinged when the agent finishes, needs an approval, or has a question. Agents can also see and build in your world.
+[T3 Code](https://t3.codes) inside Minecraft. Keep your existing coding sessions across machines, choose the models T3 offers, answer decisions and review real checkpoint changes while you play. Agents can also see and build in your world when you enable it.
 
-![The T3 panel in Minecraft: a prompt, and the agent's reply after it built in the world](docs/panel.jpg)
+![A real T3 checkpoint reviewed in Minecraft, with changed files and its Git patch](docs/checkpoint-review.png)
+
+A release jar for ordinary Fabric profiles, with a personal client office or an operator-owned shared server office. [Download 0.3.0](https://github.com/maxwellyoung/t3craft/releases/tag/v0.3.0).
 
 ![What it built, with the single "Done" toast](docs/agent-build.jpg)
 
@@ -33,6 +35,10 @@ Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 de
 In 0.3.0, each machine has eight stable desk slots. Pins take priority, then waiting threads, working threads and recent conversations. Included residents keep their slot when activity reorders the sidebar; pinned identity survives reconnect and client restart. Offline residents are labelled Offline and stop emitting work effects or typing sounds. A resident still walks to the whiteboard or lounge when its status changes, returning to its own chair when working again. Pins are saved per world and dimension, keyed by the owning environment and thread. Re-pairing or renaming a machine keeps its floor order. An archived/unavailable pin is shown in **Pins**; it has no resident and can be removed. An unavailable pin’s old slot can be used temporarily and is reclaimed if the pin returns.
 
 Shared offices have separate operator-owned preferences: `/t3office pin <thread-id>` and `/t3office unpin <thread-id>`. Client pins do not change the shared office. A paired client can open a shared resident’s thread without placing its own village. Pins and project filters change only Minecraft presentation, never agent permissions. Plain `/t3 village` remains a recent-thread arrangement.
+
+![Pinned resident and project navigation in the actual Minecraft client, using isolated fixtures](docs/pinned-projects.png)
+
+*The office navigation capture uses isolated two-machine fixtures; the checkpoint capture above reads an actual installed T3 session.*
 
 ## Decision desk and checkpoint review (0.2.0)
 
@@ -190,6 +196,14 @@ The walkthrough builds an office in that test world, enters through the whiteboa
 `./gradlew reviewProbe -Pconfig=<existing-local-config>` is a read-only compatibility probe against a saved pairing. It prints checkpoint/file counts without credentials or file content and sends no agent commands.
 
 `./gradlew liveCheck -Pconfig=<existing-local-config> -PqaProject=<descriptor>` is opt-in and calls a real agent. Supply a disposable Git project containing `greeting.txt` (`hello` plus a newline) and `obsolete.txt`; the descriptor has `projectId` and `workspaceRoot`. It creates a new QA thread, approves only that thread's requests, and verifies the edit, deletion, live streams and checkpoint. It does not commit or push the QA repository.
+
+## What comes next
+
+- Guided machine connections and re-pairing, with clear health and expiry recovery.
+- More readable activity and checkpoint navigation, using actual backend events and test receipts.
+- A short actual-game demonstration and broader distribution after ordinary-launcher installation checks.
+
+These are proposals, not shipped features or release dates.
 
 ## License and disclaimer
 
