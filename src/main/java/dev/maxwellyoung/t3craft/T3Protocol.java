@@ -39,6 +39,7 @@ final class T3Protocol {
 			out.add("latestTurn", turn);
 		}
 		out.add("messages", array(p, "messages"));
+		out.add("turnItems", array(p, "turnItems"));
 		JsonArray activities = new JsonArray(); boolean approvals = false, inputs = false;
 		for (var value : array(p, "runtimeRequests")) {
 			JsonObject request = value.getAsJsonObject();

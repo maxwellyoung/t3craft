@@ -20,8 +20,11 @@ public final class ReviewProbe {
 			var detail = api.thread(id, 4);
 			if (!detail.has("checkpoints") || detail.getAsJsonArray("checkpoints").isEmpty()) continue;
 			var review = api.review(id);
+			var activity = T3State.focus(detail).activity();
 			System.out.println("PASS installed T3 read-only checkpoint RPC: checkpoint " + review.turnCount()
-				+ ", " + T3Diff.files(review.diff()).size() + " changed files; checkpoint reply present=" + review.reply().contains("T3CRAFT_E2E_OK") + "; no content logged or actions dispatched.");
+				+ ", " + T3Diff.files(review.diff()).size() + " changed files; checkpoint reply present=" + review.reply().contains("T3CRAFT_E2E_OK")
+				+ "; activity items=" + activity.size() + "; command receipts=" + activity.stream().filter(e -> "command_execution".equals(e.kind()) && e.detail() != null && e.detail().contains("Exit code:")).count()
+				+ "; no content logged or actions dispatched.");
 			return;
 		}
 		throw new IllegalStateException("No completed checkpoint found in the sampled threads.");

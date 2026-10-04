@@ -38,6 +38,7 @@ final class T3Screen extends Screen {
 	private Button deny;
 	private Button stop;
 	private Button review;
+	private Button activity;
 	private Button pin;
 	private String selectedRequest;
 	private T3State.Focus shownFocus;
@@ -105,7 +106,11 @@ final class T3Screen extends Screen {
 		addRenderableWidget(Button.builder(Component.literal("Pins"), b -> minecraft.gui.setScreen(new T3PinsScreen(mod)))
 			.bounds(MARGIN + 87, height - MARGIN - 47, SIDEBAR - 92, 18).build());
 		addRenderableWidget(Button.builder(Component.literal("Connections"), b -> mod.openConnections())
-			.bounds(MARGIN + 5, height - MARGIN - 69, SIDEBAR - 10, 18).build());
+			.bounds(MARGIN + 5, height - MARGIN - 69, 78, 18).build());
+		activity = addRenderableWidget(Button.builder(Component.literal("Activity"), b -> {
+			String id = mod.state().snapshot().focusedId();
+			if (id != null) minecraft.gui.setScreen(new T3ActivityScreen(mod, id));
+		}).bounds(MARGIN + 87, height - MARGIN - 69, SIDEBAR - 92, 18).build());
 		syncWidgets(mod.state().snapshot());
 		revealFocused();
 	}
@@ -151,6 +156,7 @@ final class T3Screen extends Screen {
 		boolean online = mod.state().online(snapshot.focusedId());
 		approve.active = deny.active = online;
 		review.active = snapshot.focusedRow() != null && online;
+		activity.active = !newThread && snapshot.focusedRow() != null;
 		stop.active = online;
 		approve.visible = deny.visible = hasApproval;
 		T3State.ThreadRow row = snapshot.focusedRow();

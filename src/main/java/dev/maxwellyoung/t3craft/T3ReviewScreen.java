@@ -20,6 +20,9 @@ final class T3ReviewScreen extends Screen {
 	private boolean loading, closed;
 	private String error;
 	private Button feedback, refresh;
+	private Button previous, next;
+	private List<T3Diff.Line> numbered = List.of();
+	private List<Integer> hunks = List.of();
 
 	T3ReviewScreen(T3CraftClient mod, String threadId) { super(Component.literal("Checkpoint review")); this.mod = mod; this.threadId = threadId; }
 	@Override protected void init() {
@@ -27,18 +30,23 @@ final class T3ReviewScreen extends Screen {
 		mod.state().setPanelOpen(true);
 		addRenderableWidget(Button.builder(Component.literal("Back"), b -> { mod.focus(threadId); mod.openPanel(); }).bounds(12, height - 30, 54, 20).build());
 		refresh = addRenderableWidget(Button.builder(Component.literal("Refresh"), b -> load()).bounds(72, height - 30, 66, 20).build());
-		feedback = addRenderableWidget(Button.builder(Component.literal("Give feedback"), b -> {
+		previous = addRenderableWidget(Button.builder(Component.literal("Prev"), b -> jump(-1)).bounds(144, height - 30, 40, 20).build());
+		next = addRenderableWidget(Button.builder(Component.literal("Next"), b -> jump(1)).bounds(188, height - 30, 40, 20).build());
+		int feedbackWidth = Math.min(130, width - 244);
+		feedback = addRenderableWidget(Button.builder(Component.literal(feedbackWidth < 100 ? "Feedback" : "Give feedback"), b -> {
 			mod.focus(threadId);
 			String draft = mod.draft(threadId);
 			mod.saveDraft(threadId, draft.isBlank() ? "Feedback on checkpoint " + review.turnCount() + ":\n" : draft);
 			mod.openPanel();
-		}).bounds(width - 142, height - 30, 130, 20).build());
+		}).bounds(width - feedbackWidth - 12, height - 30, feedbackWidth, 20).build());
 		if (review == null && !loading) load();
 		tick();
 	}
 	@Override public void tick() {
 		refresh.active = !loading && mod.state().online(threadId);
 		feedback.active = review != null && mod.state().online(threadId);
+		previous.active = !loading && error == null && hunks.stream().anyMatch(i -> i < scroll);
+		next.active = !loading && error == null && hunks.stream().anyMatch(i -> i > scroll);
 	}
 	void load() {
 		int request = ++serial;
@@ -66,8 +74,18 @@ final class T3ReviewScreen extends Screen {
 	private int visible() { return Math.max(1, (height - 94) / 20); }
 	private void choose(int file) {
 		selected = file; scroll = 0; horizontal = 0;
+		numbered = file < 0 ? List.of() : T3Diff.numbered(files.get(file));
+		hunks = file < 0 ? List.of() : T3Diff.hunks(files.get(file));
 		patchWidth = file < 0 ? 0 : files.get(file).lines().stream().mapToInt(font::width).max().orElse(0);
+		tick();
 	}
+	private void jump(int direction) {
+		if (loading || error != null) return;
+		var candidates = hunks.stream().filter(i -> direction > 0 ? i > scroll : i < scroll).toList();
+		if (!candidates.isEmpty()) scroll = direction > 0 ? candidates.getFirst() : candidates.getLast();
+		tick();
+	}
+	int scrollForTest() { return scroll; }
 	@Override public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && event.x() >= 12 && event.x() < side() && event.y() >= 58 && event.y() < height - 36) {
 			int index = fileScroll + (int) ((event.y() - 58) / 20) - 1;
@@ -82,6 +100,8 @@ final class T3ReviewScreen extends Screen {
 		return true;
 	}
 	@Override public boolean keyPressed(KeyEvent event) {
+		if (event.key() == InputConstants.KEY_PAGEDOWN) { jump(1); return true; }
+		if (event.key() == InputConstants.KEY_PAGEUP) { jump(-1); return true; }
 		if (event.key() == InputConstants.KEY_DOWN) { scroll += 3; return true; }
 		if (event.key() == InputConstants.KEY_UP) { scroll = Math.max(0, scroll - 3); return true; }
 		if (event.key() == InputConstants.KEY_RIGHT) { horizontal += 40; return true; }
@@ -93,7 +113,7 @@ final class T3ReviewScreen extends Screen {
 	@Override public void extractRenderState(GuiGraphicsExtractor g, int mx, int my, float delta) {
 		g.fill(8, 8, width - 8, height - 8, 0xF0222529);
 		g.text(font, T3Hud.ellipsize(font, review == null ? "Checkpoint review" : review.title(), width - 32), 16, 17, 0xFFE5E7EB, false);
-		String meta = review == null ? "Read-only · completed checkpoints" : "Checkpoint " + review.turnCount() + " · " + files.size() + " files · read-only";
+		String meta = review == null ? "Read-only · completed checkpoints" : "Checkpoint " + review.turnCount() + " · " + files.size() + " files · old / new lines";
 		if (!mod.state().online(threadId)) meta += " · OFFLINE / last loaded";
 		g.text(font, T3Hud.ellipsize(font, meta, width - 32), 16, 34, 0xFF9CA3AF, false);
 		for (int i = fileScroll; i < Math.min(files.size() + 1, fileScroll + visible()); i++) {
@@ -105,20 +125,29 @@ final class T3ReviewScreen extends Screen {
 		g.enableScissor(x, 56, width - 12, height - 40);
 		if (review == null || selected < 0 || loading || error != null) {
 			String text = error != null ? "Could not load review:\n" + error : loading ? "Loading completed checkpoint…"
-				: review.reply() + (files.isEmpty() ? "\n\nNo file changes in this checkpoint range." : "\n\nChoose a file to inspect its patch.\nArrows: scroll / pan · F5: refresh");
+				: review.reply() + (files.isEmpty() ? "\n\nNo file changes in this checkpoint range." : "\n\nChoose a file to inspect its patch.\nArrows: scroll / pan · Prev/Next or PgUp/PgDn: changes · F5: refresh");
 			var lines = font.split(Component.literal(text), available);
 			scroll = Math.min(scroll, Math.max(0, lines.size() - Math.max(1, (height - 100) / (font.lineHeight + 2))));
 			int y = 60;
 			for (int i = scroll; i < lines.size() && y < height - 40; i++, y += font.lineHeight + 2) g.text(font, lines.get(i), x, y, error == null ? 0xFFE5E7EB : 0xFFFF9772, false);
 		} else {
-			var lines = files.get(selected).lines();
-			scroll = Math.min(scroll, Math.max(0, lines.size() - Math.max(1, (height - 100) / font.lineHeight)));
-			horizontal = Math.min(horizontal, Math.max(0, patchWidth - available));
+			var lines = numbered;
+			// Allow the final hunk to sit at the top even when it is shorter than the viewport.
+			scroll = Math.min(scroll, Math.max(0, lines.size() - 1));
+			int digits = Math.max(2, Integer.toString(lines.stream().mapToInt(line -> Math.max(line.oldLine() == null ? 0 : line.oldLine(), line.newLine() == null ? 0 : line.newLine())).max().orElse(0)).length());
+			int column = font.width("9".repeat(digits)) + 4, gutter = column * 2 + 4;
+			horizontal = Math.min(horizontal, Math.max(0, patchWidth - (available - gutter)));
 			int y = 60;
 			for (int i = scroll; i < lines.size() && y < height - 40; i++, y += font.lineHeight) {
-				String line = lines.get(i);
+				String line = lines.get(i).text();
 				int color = line.startsWith("+") ? 0xFF9FE6B3 : line.startsWith("-") ? 0xFFFFA9A9 : line.startsWith("@@") ? 0xFF91C9FF : 0xFFE5E7EB;
-				g.text(font, line, x - horizontal, y, color, false);
+				g.enableScissor(x + gutter, 56, width - 12, height - 40);
+				g.text(font, line, x + gutter - horizontal, y, color, false);
+				g.disableScissor();
+				String old = lines.get(i).oldLine() == null ? "" : lines.get(i).oldLine().toString();
+				String revised = lines.get(i).newLine() == null ? "" : lines.get(i).newLine().toString();
+				g.text(font, old, x + column - 4 - font.width(old), y, 0xFF9CA3AF, false);
+				g.text(font, revised, x + column * 2 - 4 - font.width(revised), y, 0xFF9CA3AF, false);
 			}
 		}
 		g.disableScissor();

@@ -30,6 +30,20 @@ public final class FeatureChecks {
 		check(review.reply().startsWith("Updated the greeting"), "reply belongs to checkpoint, not a later unrelated assistant message");
 		check(review.turnCount() == 1 && files.size() == 2, "actual fixture RPC yields a completed checkpoint and two files");
 		check(files.get(1).path().equals("obsolete.txt") && files.get(1).lines().contains("+++ /dev/null"), "deleted file is retained");
+		var numbered = T3Diff.numbered(files.getFirst());
+		var hunks = T3Diff.hunks(files.getFirst());
+		check(hunks.size() == 2, "multiple changes are reachable");
+		check(numbered.get(hunks.get(0) + 1).oldLine() == 1 && numbered.get(hunks.get(0) + 1).newLine() == null, "deleted line keeps only old number");
+		check(numbered.get(hunks.get(1) + 1).oldLine() == 20 && numbered.get(hunks.get(1) + 1).newLine() == 21, "context resets both hunk positions");
+		check(T3Diff.numbered(files.get(1)).stream().noneMatch(line -> line.newLine() != null), "deleted file has no new lines");
+		var edge = T3Diff.files("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1,2 @@\n+first\n\\ No newline at end of file\n+second\nmetadata\n").getFirst();
+		check(T3Diff.numbered(edge).get(6).newLine() == 2 && T3Diff.numbered(edge).get(7).newLine() == null, "no-newline marker and metadata never consume line numbers");
+		var focus = T3State.focus(apiA.thread("A-done-0", 4));
+		check(!focus.activity().isEmpty(), "backend activity survives both protocols");
+		if (apiA.negotiatedProtocol() == 2) {
+			check(focus.activity().stream().anyMatch(e -> "command_execution".equals(e.kind()) && e.detail().equals("npm test\nExit code: 1")), "actual failed command receipt retained without a success claim");
+			check(focus.activity().stream().anyMatch(e -> "future_tool".equals(e.kind()) && "running".equals(e.status())), "unknown backend item keeps its explicit title and status");
+		}
 		check(T3Diff.files("").isEmpty(), "no-change patch has no files");
 		check(T3Diff.files("diff --git a/image.png b/image.png\nBinary files a/image.png and b/image.png differ\n").getFirst().path().equals("image.png"), "binary file is retained");
 		check(T3Diff.files("diff --git a/old b/new\nsimilarity index 100%\nrename from old\nrename to new\n").getFirst().path().equals("new"), "pure rename is retained");

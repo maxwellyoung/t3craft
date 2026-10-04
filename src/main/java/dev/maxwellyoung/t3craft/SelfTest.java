@@ -14,7 +14,7 @@ import net.minecraft.world.entity.npc.villager.Villager;
  * {@code shared:<link>} pairs and places the dev server's shared village. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { SETUP_FORM, SETUP_INVALID, SETUP_EXPIRED, SETUP_A, SETUP_B, SETUP_AUTH, SETUP_WRONG, SETUP_REPAIRED, SETUP_REMOVED, SETUP_RETURN, SETUP_RESTORE, SETUP_LAST, SETUP_LIVE, STABLE_SITE, STABLE_CHURN, STABLE_CAPTURE, STABLE_OFFLINE, STABLE_RECOVER, STABLE_RESTORE, STABLE_ARCHIVE, SHARED_STABLE, SHARED_CHURN, SHARED_TARGET, SHARED_OPEN, SHARED_UNPIN, AUTH_ERROR, AUTH_RECOVER, PROTOCOL_ERROR, PROTOCOL_RECOVER, RELEASE_SITE, RELEASE_OPEN, RELEASE_CHECK, RELEASE_FEEDBACK, DESK_SITE, DESK_OPEN, DESK_REQUEST, DESK_ANSWERED, DESK_REVIEW_OPEN, DESK_REVIEW, DESK_DIFF, DESK_FEEDBACK, DESK_SIDEBAR, SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { ACTIVITY_OPEN, ACTIVITY_CHECK, ACTIVITY_RETURN, ACTIVITY_REVIEW, ACTIVITY_NEXT, ACTIVITY_BACK, ACTIVITY_OFFLINE, ACTIVITY_OFFLINE_BACK, SETUP_FORM, SETUP_INVALID, SETUP_EXPIRED, SETUP_A, SETUP_B, SETUP_AUTH, SETUP_WRONG, SETUP_REPAIRED, SETUP_REMOVED, SETUP_RETURN, SETUP_RESTORE, SETUP_LAST, SETUP_LIVE, STABLE_SITE, STABLE_CHURN, STABLE_CAPTURE, STABLE_OFFLINE, STABLE_RECOVER, STABLE_RESTORE, STABLE_ARCHIVE, SHARED_STABLE, SHARED_CHURN, SHARED_TARGET, SHARED_OPEN, SHARED_UNPIN, AUTH_ERROR, AUTH_RECOVER, PROTOCOL_ERROR, PROTOCOL_RECOVER, RELEASE_SITE, RELEASE_OPEN, RELEASE_CHECK, RELEASE_FEEDBACK, DESK_SITE, DESK_OPEN, DESK_REQUEST, DESK_ANSWERED, DESK_REVIEW_OPEN, DESK_REVIEW, DESK_DIFF, DESK_FEEDBACK, DESK_SIDEBAR, SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
@@ -292,6 +292,64 @@ final class SelfTest {
 					finish(minecraft, "FAIL recovery lost draft"); return;
 				}
 				finish(minecraft, "PASS connection recovery: per-machine auth and protocol guidance, healthy peer, reconnect and preserved draft");
+			}
+
+			case ACTIVITY_OPEN -> {
+				if (ticks < 20 || !(minecraft.gui.screen() instanceof T3Screen screen)) return;
+				press(screen, "Activity"); advance(Step.ACTIVITY_CHECK, "opened activity through the real button");
+			}
+			case ACTIVITY_CHECK -> {
+				if (ticks < 30 || !(minecraft.gui.screen() instanceof T3ActivityScreen screen)) return;
+				if (screen.entriesForTest().stream().noneMatch(e -> "command_execution".equals(e.kind()) && e.detail() != null && e.detail().contains("Exit code:"))) {
+					finish(minecraft, "FAIL command receipt missing in activity view"); return;
+				}
+				if ("activity-review".equals(prompt)) shot(minecraft, "activity-fixture-receipts");
+				press(screen, "Back to chat"); advance(Step.ACTIVITY_RETURN, "returning with unsent draft");
+			}
+			case ACTIVITY_RETURN -> {
+				if (ticks < 20 || !(minecraft.gui.screen() instanceof T3Screen screen)) return;
+				if (!"Activity QA draft".equals(screen.composerValueForTest())) { finish(minecraft, "FAIL activity lost draft"); return; }
+				press(screen, "Review"); advance(Step.ACTIVITY_REVIEW, "opening checkpoint navigation");
+			}
+			case ACTIVITY_REVIEW -> {
+				if (ticks < 40 || !(minecraft.gui.screen() instanceof T3ReviewScreen screen) || screen.reviewForTest() == null) return;
+				click(screen, 30, 83);
+				var hunks = T3Diff.hunks(screen.filesForTest().getFirst());
+				if (hunks.isEmpty() || "activity-review".equals(prompt) && hunks.size() != 2) { finish(minecraft, "FAIL checkpoint changes missing"); return; }
+				press(screen, "Next");
+				if (screen.scrollForTest() != hunks.getFirst()) { finish(minecraft, "FAIL first change navigation"); return; }
+				if ("activity-review".equals(prompt)) press(screen, "Next");
+				advance(Step.ACTIVITY_NEXT, "navigated actual change controls");
+			}
+			case ACTIVITY_NEXT -> {
+				if (ticks < 30 || !(minecraft.gui.screen() instanceof T3ReviewScreen screen)) return;
+				var hunks = T3Diff.hunks(screen.filesForTest().getFirst());
+				if ("activity-review".equals(prompt)) {
+					if (screen.scrollForTest() != hunks.getLast()) { finish(minecraft, "FAIL last change navigation"); return; }
+					shot(minecraft, "numbered-checkpoint-changes");
+					press(screen, "Prev");
+					if (screen.scrollForTest() != hunks.getFirst()) { finish(minecraft, "FAIL previous change navigation"); return; }
+					screen.keyPressed(new net.minecraft.client.input.KeyEvent(com.mojang.blaze3d.platform.InputConstants.KEY_RIGHT, 0, 0));
+				}
+				press(screen, "Give feedback"); advance(Step.ACTIVITY_BACK, "returning checkpoint feedback to existing draft");
+			}
+			case ACTIVITY_BACK -> {
+				if (ticks < 20 || !(minecraft.gui.screen() instanceof T3Screen screen)) return;
+				if (!"Activity QA draft".equals(screen.composerValueForTest())) { finish(minecraft, "FAIL review lost activity draft"); return; }
+				if ("activity-live".equals(prompt)) { finish(minecraft, "PASS actual T3 command receipts, checkpoint navigation and preserved draft; read-only, no dispatch"); return; }
+				press(screen, "Activity"); fixtureControl(minecraft, "offline"); advance(Step.ACTIVITY_OFFLINE, "disconnecting only fixture owner A");
+			}
+			case ACTIVITY_OFFLINE -> {
+				if (ticks < 60 || mod.state().online("A-done-0")) return;
+				if (!(minecraft.gui.screen() instanceof T3ActivityScreen screen) || screen.entriesForTest().isEmpty() || !mod.state().online("B-done-0")) {
+					finish(minecraft, "FAIL offline cache or healthy peer"); return;
+				}
+				shot(minecraft, "activity-offline-cache"); press(screen, "Back to chat"); advance(Step.ACTIVITY_OFFLINE_BACK, "returning from cached activity");
+			}
+			case ACTIVITY_OFFLINE_BACK -> {
+				if (ticks < 20 || !(minecraft.gui.screen() instanceof T3Screen screen)) return;
+				if (!"Activity QA draft".equals(screen.composerValueForTest())) { finish(minecraft, "FAIL offline draft"); return; }
+				finish(minecraft, "PASS packaged activity: failed-command receipt, unknown item, numbered multi-hunk next/previous, feedback draft, offline cache and healthy peer");
 			}
 
 			case RELEASE_SITE -> {
@@ -900,6 +958,13 @@ final class SelfTest {
 				finish(minecraft, "half-written prompt".equals(value) ? "PASS (pair + draft)" : "FAIL draft was '" + value + "'");
 			}
 			case WAIT_WORLD -> {
+				if ("activity-review".equals(prompt) || "activity-live".equals(prompt)) {
+					if (minecraft.player == null || ticks < 600 || snapshot.focus() == null || !snapshot.connected()) return;
+					if ("activity-review".equals(prompt) && !"A-done-0".equals(snapshot.focusedId())) { finish(minecraft, "FAIL requires isolated fixture focus"); return; }
+					mod.openPanel(); ((T3Screen)minecraft.gui.screen()).setComposerForTest("Activity QA draft");
+					advance(Step.ACTIVITY_OPEN, "read-only activity workflow; no prompt submission"); return;
+				}
+
 				if (prompt.startsWith("guided-")) {
 					if (minecraft.player == null || ticks <= 140) return;
 					if ("guided-connections".equals(prompt)) {

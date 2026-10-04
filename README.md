@@ -44,9 +44,19 @@ Shared offices have separate operator-owned preferences: `/t3office pin <thread-
 
 Press **J**, run `/t3 decisions`, or right-click the office whiteboard to see pending approvals and questions across every paired machine. The queue includes older threads beyond the office's eight residents per floor. It shows the machine, project, request and age; opening a row targets that exact request. Responses are rechecked against current T3 state before dispatch. Offline machines retain their last-known requests with answering disabled.
 
-Use **Review** in the thread header, `/t3 review`, or the office lectern to inspect the latest ready checkpoint. Choose a file for its complete Git patch, including deletions, rename metadata and binary-file notices. Arrow keys scroll or pan; **Home** resets the view and **F5** refreshes. The displayed agent reply is matched to the checkpoint; if it falls outside recent history the screen says so. **Give feedback** opens that thread's composer and preserves any existing unsent draft. This screen does not apply or merge changes, and does not imply tests passed.
+Use **Review** in the thread header, `/t3 review`, or the office lectern to inspect the latest ready checkpoint. Choose a file for its complete Git patch, including deletions, rename metadata and binary-file notices. Old/new line numbers stay fixed while you pan. **Prev/Next** and **PgUp/PgDn** jump between unified diff hunks, including the last short hunk. Arrow keys scroll or pan; **Home** resets the view and **F5** refreshes. The displayed agent reply is matched to the checkpoint; if it falls outside recent history the screen says so. **Give feedback** opens that thread's composer and preserves any existing unsent draft. This screen does not apply or merge changes, and does not imply tests passed.
 
 Tested against legacy and protocol 2 fixtures, plus the installed T3 Code nightly with live streams, a real agent edit, approvals and checkpoint retrieval. The client sends the required protocol 2 header, adapts run projections and uses RPC dispatch on current nightlies. Older servers retain their HTTP dispatch path.
+
+## Activity and numbered review (0.5.0)
+
+Open **Activity** beside Connections in the panel. It shows the focused thread's recent backend events, newest first, and retains the last loaded events offline. Protocol 2 uses turn items: explicit titles, status and timestamps, plus command input and exit codes when supplied. Unknown item types remain visible with their backend title/status. Legacy servers show activity summaries. The view does not infer test success from a completed command or expose arbitrary nested payloads. History is limited to the backend's recent window.
+
+**Back to chat** and review's **Give feedback** preserve the unsent draft. Checkpoint patches now have old/new line numbers and change navigation; binary and rename-only patches retain their metadata without fabricated line numbers.
+
+![Recent backend activity from isolated fixtures](docs/activity-receipts.png)
+
+![Numbered checkpoint navigation from isolated fixtures](docs/numbered-review.png)
 
 ## Guided connections (0.4.0)
 
@@ -86,7 +96,7 @@ Set up T3 Craft (https://github.com/maxwellyoung/t3craft) on this machine so I c
 
 Or by hand:
 
-1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.3.0.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
+1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.5.0.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
 3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
 
@@ -148,7 +158,7 @@ For a second world with its own app, give it its own profile and server folder (
 Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).
 
 ```sh
-./gradlew build                     # → build/libs/t3craft-0.3.0.jar
+./gradlew build                     # → build/libs/t3craft-0.5.0.jar
 ./gradlew runServer --args=nogui    # local offline test server in run-server/ (set white-list=false)
 ./gradlew runClient                 # dev client
 ```
@@ -183,7 +193,7 @@ Start the isolated fixtures in one terminal:
 python3 scripts/feature-fixture.py --config "$PWD/run/feature-fixture.json"
 ```
 
-Then run `./gradlew featureCheck`. It exercises two-machine routing, older waiting threads, stale requests, disconnect/reconnect, checkpoint reply identity, and deleted/binary/renamed/empty patches. It never uses a real pairing or dispatches to an agent. Run the fixture with `--protocol2 --port 25682`, then `./gradlew featureCheck -PfixturePort=25682`, to exercise current T3 wire shapes. CI checks both protocols.
+Then run `./gradlew featureCheck`. It also checks explicit failed-command receipts, unknown activity types and multi-hunk line numbering. It exercises two-machine routing, older waiting threads, stale requests, disconnect/reconnect, checkpoint reply identity, and deleted/binary/renamed/empty patches. It never uses a real pairing or dispatches to an agent. Run the fixture with `--protocol2 --port 25682`, then `./gradlew featureCheck -PfixturePort=25682`, to exercise current T3 wire shapes. CI checks both protocols.
 
 `./gradlew officeCheck` verifies stable assignments, pin/waiting/working priority, actual configuration save/load, owner/project identity, removal and independent client/shared preferences with synthetic data. It does not contact an agent.
 
@@ -207,13 +217,15 @@ curl -fsS http://127.0.0.1:25681/_qa/reset
 
 The walkthrough builds an office in that test world, enters through the whiteboard, approves only the fixture request, opens the lectern, clicks both patch files and checks the unsent feedback draft. It saves framebuffer screenshots in `run/screenshots/` and logs `SELFTEST RESULT PASS` before quitting. Use a disposable world: the build changes blocks.
 
+`activity-review` in the packaged Minecraft client requires protocol 2 fixtures focused on `A-done-0`. It clicks Activity, navigates multiple checkpoint hunks, checks feedback draft preservation, disconnects only fixture A and verifies cached events and healthy B. `activity-live` exercises the same read-only entry points on an existing real T3 QA thread with a completed command and checkpoint. Neither submits a prompt or approval; live output is not included in public screenshots.
+
 `./gradlew reviewProbe -Pconfig=<existing-local-config>` is a read-only compatibility probe against a saved pairing. It prints checkpoint/file counts without credentials or file content and sends no agent commands.
 
 `./gradlew liveCheck -Pconfig=<existing-local-config> -PqaProject=<descriptor>` is opt-in and calls a real agent. Supply a disposable Git project containing `greeting.txt` (`hello` plus a newline) and `obsolete.txt`; the descriptor has `projectId` and `workspaceRoot`. It creates a new QA thread, approves only that thread's requests, and verifies the edit, deletion, live streams and checkpoint. It does not commit or push the QA repository.
 
 ## What comes next
 
-- More readable activity and checkpoint navigation, using actual backend events and test receipts.
+- Clearer resident identity and room signage, grounded in the existing session workflow.
 - A short actual-game demonstration and broader distribution after ordinary-launcher installation checks.
 
 These are proposals, not shipped features or release dates.

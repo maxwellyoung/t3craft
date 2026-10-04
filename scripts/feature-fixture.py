@@ -24,6 +24,10 @@ index 1111111..2222222 100644
 -export const greeting = "hello";
 +export const greeting = "hello, Minecraft";
 +export const reviewed = true;
+@@ -20,2 +21,2 @@
+ unchanged context
+-old footer
++new footer
 diff --git a/obsolete.txt b/obsolete.txt
 deleted file mode 100644
 --- a/obsolete.txt
@@ -45,7 +49,7 @@ def thread(ident, waiting=False, question=False, older=False):
             'modelSelection': {'instanceId': 'fixture', 'model': 'fixture'}, 'runtimeMode': 'approval-required', 'interactionMode': 'default',
             'hasPendingApprovals': waiting and not question, 'hasPendingUserInput': waiting and question,
             'messages': [{'id': ident + '-reply', 'role': 'assistant', 'text': 'Updated the greeting and removed the obsolete file. Ready for your review.', 'streaming': False}, {'id': ident + '-newer-reply', 'role': 'assistant', 'text': 'A later unrelated reply.', 'streaming': False}],
-            'activities': [{'kind': kind, 'createdAt': now, 'payload': payload}] if waiting else [],
+            'activities': [{'kind': kind, 'createdAt': now, 'payload': payload}] if waiting else [{'kind': 'command.completed', 'summary': 'Fixture command completed (exit 1)', 'createdAt': now, 'payload': {'exitCode': 1}}],
             'checkpoints': [{'checkpointTurnCount': 1, 'status': 'ready', 'assistantMessageId': ident + '-reply', 'files': [{'path': 'src/greeting.ts'}, {'path': 'obsolete.txt'}]}]}
 
 
@@ -57,12 +61,13 @@ def shell_thread(value):
 def projection(value):
     ident = value['id']; run_id = ident + '-turn'; node_id = ident + '-node'
     requests = []; items = []
-    if value['activities']:
+    if value['hasPendingApprovals'] or value['hasPendingUserInput']:
         question = value['activities'][0]['kind'] == 'user-input.requested'
         resolved = any(a['kind'].endswith('.resolved') for a in value['activities'])
         requests = [{'id': 'shared-request', 'nodeId': node_id, 'kind': 'user_input' if question else 'command', 'status': 'resolved' if resolved else 'pending', 'responseCapability': {'type': 'live', 'providerSessionId': 'fixture-session'}, 'createdAt': value['updatedAt']}]
         payload = value['activities'][0]['payload']
         items = [{'type': 'user_input_request' if question else 'approval_request', 'requestId': 'shared-request', 'nodeId': node_id, 'questions': payload.get('questions', []), 'prompt': payload.get('detail'), 'requestKind': 'command'}]
+    items += [{'id': ident + '-command', 'type': 'command_execution', 'status': 'completed', 'input': 'npm test', 'exitCode': 1, 'startedAt': value['updatedAt'], 'ordinal': 2}, {'id': ident + '-unknown', 'type': 'future_tool', 'title': 'Future backend tool', 'status': 'running', 'startedAt': value['updatedAt'], 'ordinal': 3}]
     messages = [{**m, 'runId': run_id if i == 0 else 'unrelated-run', 'createdAt': value['updatedAt']} for i, m in enumerate(value['messages'])]
     return {'thread': value, 'runs': [{'id': run_id, 'ordinal': 1, 'status': 'completed', 'requestedAt': value['updatedAt'], 'startedAt': value['updatedAt']}], 'messages': messages, 'runtimeRequests': requests, 'turnItems': items,
             'checkpoints': [{'appRunOrdinal': 1, 'runId': run_id, 'capturedAt': value['updatedAt'], 'status': 'ready', 'files': value['checkpoints'][0]['files']}]}

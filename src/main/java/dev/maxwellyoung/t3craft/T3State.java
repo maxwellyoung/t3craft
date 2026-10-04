@@ -47,7 +47,7 @@ public final class T3State {
 	public record UserInput(String requestId, List<Question> questions) {}
 
 	public record Focus(String threadId, List<Message> messages, List<Approval> approvals,
-		List<UserInput> userInputs, String lastError) {
+		List<UserInput> userInputs, String lastError, List<T3Activity.Entry> activity) {
 		public boolean needsInput() {
 			return !userInputs.isEmpty();
 		}
@@ -706,7 +706,7 @@ public final class T3State {
 		}
 		JsonObject session = object(thread, "session");
 		return new Focus(thread.get("id").getAsString(), Collections.unmodifiableList(messages),
-			List.copyOf(approvals.values()), List.copyOf(openInputs.values()), session == null ? null : string(session, "lastError"));
+			List.copyOf(approvals.values()), List.copyOf(openInputs.values()), session == null ? null : string(session, "lastError"), T3Activity.entries(thread));
 	}
 
 	private static List<Question> questions(JsonObject payload) {
