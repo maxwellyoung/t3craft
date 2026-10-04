@@ -102,17 +102,28 @@ public final class T3Config {
 		return new T3Config();
 	}
 
-	public void save(Path path) {
+	/** Write a private replacement first so a new pairing is never briefly world-readable. */
+	public boolean save(Path path) {
+		Path temporary = null;
 		try {
-			Files.createDirectories(path.getParent());
-			Files.writeString(path, GSON.toJson(this));
+			Path destination = path.toAbsolutePath();
+			Files.createDirectories(destination.getParent());
 			try {
-				Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
+				temporary = Files.createTempFile(destination.getParent(), ".t3craft-", ".tmp",
+					PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
 			} catch (UnsupportedOperationException ignored) {
-				// Windows: rely on the user profile ACLs.
+				// Windows: the replacement inherits the user profile directory ACLs.
+				temporary = Files.createTempFile(destination.getParent(), ".t3craft-", ".tmp");
 			}
+			Files.writeString(temporary, GSON.toJson(this));
+			try { Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
+			catch (java.nio.file.AtomicMoveNotSupportedException e) { Files.move(temporary, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+			return true;
 		} catch (IOException e) {
 			T3Log.LOGGER.warn("Could not save {}", path, e);
+			return false;
+		} finally {
+			if (temporary != null) try { Files.deleteIfExists(temporary); } catch (IOException ignored) { }
 		}
 	}
 }

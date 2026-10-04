@@ -72,15 +72,11 @@ public final class T3Api {
 
 	/** Accepts a T3 pairing URL (`http://host:port/pair#token=…`) and exchanges it for a bearer token. */
 	public static Pairing pair(String pairingUrl, String clientLabel) throws IOException, InterruptedException {
-		URI uri = URI.create(pairingUrl.trim());
-		String token = param(uri.getRawFragment(), "token");
-		if (token == null) token = param(uri.getRawQuery(), "token");
-		if (token == null) throw new IOException("That link has no #token=…; copy the full pairing URL from T3.");
-		String host = param(uri.getRawQuery(), "host");
-		String base = host != null
-			? (host.contains("://") ? host : "https://" + host)
-			: uri.getScheme() + "://" + uri.getRawAuthority();
-		base = base.replaceFirst("^ws", "http").replaceAll("/+$", "");
+		PairingTarget target = pairingTarget(pairingUrl);
+		String base = target.baseUrl();
+		String token = target.token();
+		// Refuse incompatible machines before consuming their one-time bootstrap link.
+		new T3Api(base, "").protocol();
 
 		String form = "grant_type=" + enc("urn:ietf:params:oauth:grant-type:token-exchange")
 			+ "&subject_token=" + enc(token)
@@ -96,11 +92,43 @@ public final class T3Api {
 			.build();
 		HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
 		if (response.statusCode() / 100 != 2) {
-			throw new IOException("Pairing failed (" + response.statusCode() + "): " + errorText(response.body()));
+			throw new IOException(response.statusCode() == 400 || response.statusCode() == 401 || response.statusCode() == 403
+				? "Link expired, used or revoked. In T3 Settings > Connections, create a fresh link."
+				: "Pairing failed (" + response.statusCode() + "). Check this machine and try a fresh link.");
 		}
-		JsonObject body = JsonParser.parseString(response.body()).getAsJsonObject();
-		return new Pairing(base, body.get("access_token").getAsString(), body.get("expires_in").getAsLong());
+		try {
+			JsonObject body = JsonParser.parseString(response.body()).getAsJsonObject();
+			String access = body.get("access_token").getAsString();
+			if (access.isBlank()) throw new IllegalArgumentException();
+			return new Pairing(base, access, body.get("expires_in").getAsLong());
+		} catch (RuntimeException e) { throw new IOException("T3 returned an invalid pairing response. Update T3 Code and try a fresh link."); }
 	}
+
+	private record PairingTarget(String baseUrl, String token) {}
+
+	/** Parse without ever putting the credential-bearing input in an exception. */
+	private static PairingTarget pairingTarget(String link) throws IOException {
+		try {
+			if (link == null || link.length() > 8192) throw new IllegalArgumentException();
+			URI uri = URI.create(link.trim());
+			String token = param(uri.getRawFragment(), "token");
+			if (token == null) token = param(uri.getRawQuery(), "token");
+			if (token == null) throw new IOException("Copy the full pairing link, including #token=, from T3 Settings > Connections.");
+			String host = param(uri.getRawQuery(), "host");
+			String base = host != null ? (host.contains("://") ? host : "https://" + host)
+				: uri.getScheme() + "://" + uri.getRawAuthority();
+			base = base.replaceFirst("^ws", "http").replaceAll("/+$", "");
+			URI address = URI.create(base);
+			if (!("http".equals(address.getScheme()) || "https".equals(address.getScheme())) || address.getHost() == null
+				|| address.getUserInfo() != null || address.getRawQuery() != null || address.getRawFragment() != null
+				|| !address.getPath().isEmpty() || address.getPort() > 65535 || address.getPort() == 0) throw new IllegalArgumentException();
+			return new PairingTarget(base, token);
+		} catch (RuntimeException e) { throw new IOException("That pairing link is invalid. Copy the complete link from T3 Settings > Connections."); }
+	}
+
+	static String pairingAddress(String link) throws IOException { return pairingTarget(link).baseUrl(); }
+	boolean sameCredentials(T3Api other) { return baseUrl.equals(other.baseUrl) && accessToken.equals(other.accessToken); }
+	int negotiatedProtocol() { return wireProtocol; }
 
 	public record Model(String slug, String name) {}
 

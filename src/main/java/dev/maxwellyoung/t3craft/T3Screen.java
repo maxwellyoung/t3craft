@@ -104,6 +104,8 @@ final class T3Screen extends Screen {
 			.bounds(MARGIN + 5, height - MARGIN - 47, 78, 18).build());
 		addRenderableWidget(Button.builder(Component.literal("Pins"), b -> minecraft.gui.setScreen(new T3PinsScreen(mod)))
 			.bounds(MARGIN + 87, height - MARGIN - 47, SIDEBAR - 92, 18).build());
+		addRenderableWidget(Button.builder(Component.literal("Connections"), b -> mod.openConnections())
+			.bounds(MARGIN + 5, height - MARGIN - 69, SIDEBAR - 10, 18).build());
 		syncWidgets(mod.state().snapshot());
 		revealFocused();
 	}
@@ -197,7 +199,7 @@ final class T3Screen extends Screen {
 	}
 
 	private int visibleRows() {
-		return Math.max(1, (height - MARGIN - 50 - listTop()) / ROW);
+		return Math.max(1, (height - MARGIN - 72 - listTop()) / ROW);
 	}
 
 	private void clampSidebarScroll(int total) {

@@ -84,6 +84,9 @@ public final class T3State {
 	private volatile Map<String, Boolean> onlineThreads = Map.of();
 	private volatile Map<String, String> connectionErrors = Map.of();
 	private volatile List<String> offlineMachines = List.of();
+	public record MachineHealth(String owner, String label, boolean online, boolean live, int protocol, int threads, String error) {}
+	private volatile List<MachineHealth> machines = List.of();
+	List<MachineHealth> machines() { return machines; }
 
 	List<T3Decisions.Entry> decisions() { return decisions; }
 	public boolean online(String threadId) { return threadId != null && onlineThreads.getOrDefault(threadId, false); }
@@ -93,11 +96,12 @@ public final class T3State {
 	/** One paired environment: its API, socket, and shell mirror. Owned by the executor thread. */
 	private static final class Env {
 		final T3Api api;
-		final String label;
+		String label;
 		final Map<String, String> projectTitles = new HashMap<>();
 		final Map<String, JsonObject> threads = new ConcurrentHashMap<>();
 		T3Socket socket;
 		boolean shellLive;
+		boolean shellLoaded;
 		String threadRequest;
 		String threadRequestFor;
 		long nextSocketAttempt;
@@ -199,13 +203,53 @@ public final class T3State {
 			waitingFetchedAt.clear();
 			decisions = List.of();
 			onlineThreads = Map.of();
-			connectionErrors = Map.of();
+			connectionErrors = Map.of(); machines = List.of(); offlineMachines = List.of();
 			focusDetail = null;
 			List<Env> next = new ArrayList<>();
 			for (Connection connection : connections) next.add(new Env(connection.api(), connection.label()));
 			envs = List.copyOf(next);
 			snapshot = new Snapshot(false, null, List.of(), focusedThreadId, null);
 			maintainSafely();
+		});
+	}
+
+	/** Change only affected owners; healthy sockets and cached conversations stay resident. */
+	void reconfigure(List<Connection> connections, String focusedId) {
+		focusedThreadId = focusedId;
+		executor.execute(() -> {
+			List<Env> next = new ArrayList<>();
+			for (Connection connection : connections) {
+				Env retained = envs.stream().filter(e -> e.api.sameCredentials(connection.api())).findFirst().orElse(null);
+				if (retained == null) {
+					retained = new Env(connection.api(), connection.label());
+					Env previous = envs.stream().filter(e -> e.api.ownerKey().equals(connection.api().ownerKey())).findFirst().orElse(null);
+					if (previous != null) {
+						retained.threads.putAll(previous.threads); retained.projectTitles.putAll(previous.projectTitles);
+						retained.error = "Reconnecting…";
+					}
+				} else retained.label = connection.label();
+				next.add(retained);
+			}
+			for (Env previous : envs) if (!next.contains(previous)) closeSocket(previous);
+			Env previousOwner = envFor(focusedId);
+			if (previousOwner == null || next.stream().noneMatch(e -> e.api.ownerKey().equals(previousOwner.api.ownerKey()))) focusDetail = null;
+			envs = List.copyOf(next);
+			Set<String> retainedIds = new HashSet<>();
+			for (Env env : next) retainedIds.addAll(env.threads.keySet());
+			lastStatus.keySet().retainAll(retainedIds); lastTurn.keySet().retainAll(retainedIds);
+			seenApprovals.keySet().retainAll(retainedIds); waitingThreads.keySet().retainAll(retainedIds);
+			waitingDetails.keySet().retainAll(retainedIds); waitingFetchedAt.keySet().retainAll(retainedIds);
+			publish(List.of()); refreshSoon = true; maintainSafely();
+		});
+	}
+
+	void retry(String owner) {
+		executor.execute(() -> {
+			for (Env env : envs) if (env.api.ownerKey().equals(owner)) {
+				closeSocket(env); env.api.forgetProtocol(); env.nextSocketAttempt = 0; env.socketFailures = 0;
+				env.error = "Reconnecting…";
+			}
+			publish(List.of()); refreshSoon = true; maintainSafely();
 		});
 	}
 
@@ -356,7 +400,11 @@ public final class T3State {
 		env.threadRequest = null;
 		env.threadRequestFor = null;
 		try {
-			T3Socket opened = env.api.openSocket(reason -> executor.execute(() -> onSocketClosed(env, reason)));
+			T3Socket[] session = new T3Socket[1];
+			T3Socket opened = env.api.openSocket(reason -> executor.execute(() -> {
+				if (envs.contains(env) && env.socket == session[0]) onSocketClosed(env, reason);
+			}));
+			session[0] = opened;
 			env.socket = opened;
 			JsonObject payload = new JsonObject();
 			payload.addProperty("requestCompletionMarker", true);
@@ -486,6 +534,7 @@ public final class T3State {
 	}
 
 	private static void applyShellSnapshot(Env env, JsonObject shell) {
+		env.shellLoaded = true;
 		env.projectTitles.clear();
 		for (JsonElement project : shell.getAsJsonArray("projects")) {
 			JsonObject p = project.getAsJsonObject();
@@ -559,7 +608,7 @@ public final class T3State {
 		Focus focus = focusDetail != null && focusDetail.threadId().equals(focusedThreadId) ? focusDetail : null;
 		if (focus != null) events = withNewApprovals(focus, rows, events);
 		List<Env> current = envs;
-		boolean connected = current.stream().anyMatch(env -> env.error == null && (env.shellLive || !env.threads.isEmpty()));
+		boolean connected = current.stream().anyMatch(env -> env.error == null && (env.shellLive || env.shellLoaded));
 		String error = current.stream().filter(env -> env.error != null)
 			.map(env -> (current.size() > 1 ? env.label + ": " : "") + env.error).reduce((a, b) -> a + " · " + b).orElse(null);
 		Map<String, Boolean> health = new HashMap<>();
@@ -575,7 +624,9 @@ public final class T3State {
 		}
 		onlineThreads = Map.copyOf(health);
 		connectionErrors = Map.copyOf(errors);
-		offlineMachines = current.stream().filter(env -> env.error != null || env.threads.isEmpty() && !env.shellLive)
+		machines = current.stream().map(env -> new MachineHealth(env.api.ownerKey(), env.label,
+			env.error == null && (env.shellLive || env.shellLoaded), env.shellLive, env.api.negotiatedProtocol(), env.threads.size(), env.error)).toList();
+		offlineMachines = current.stream().filter(env -> env.error != null || !env.shellLoaded && !env.shellLive)
 			.map(env -> env.label).toList();
 		decisions = T3Decisions.collect(rows, waitingThreads);
 		snapshot = new Snapshot(connected, error, List.copyOf(visible.values()), focusedThreadId, focus);

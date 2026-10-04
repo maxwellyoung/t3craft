@@ -10,9 +10,11 @@ import json
 import socket
 import struct
 import threading
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs
 
 PATCH = '''diff --git a/src/greeting.ts b/src/greeting.ts
 index 1111111..2222222 100644
@@ -118,6 +120,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply({'ok': True})
             if self.path == '/_qa/dispatches': return self.reply(self.server.dispatches)
             if self.path == '/_qa/reset': self.server.reset(); self.broadcast_snapshot(); return self.reply({'ok': True})
+            if self.path == '/_qa/empty': self.server.threads.clear(); self.broadcast_snapshot(); return self.reply({'ok': True})
             if self.path == '/_qa/collision':
                 self.server.threads['A-done-0'] = thread('A-done-0')
                 self.broadcast_snapshot()
@@ -161,8 +164,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        if self.path == '/oauth/token' and parse_qs(body.decode()).get('subject_token', [''])[0] == 'delayed-fixture': time.sleep(3)
         with self.server.lock:
             if self.server.offline: return self.reply({'message': 'Fixture offline'}, 503)
+            if self.path == '/oauth/token':
+                token = parse_qs(body.decode()).get('subject_token', [''])[0]
+                if token == 'expired-fixture': return self.reply({'message': 'Do not expose this credential: ' + token}, 401)
+                if token not in ('fixture-pairing', 'delayed-fixture'): return self.reply({'message': 'Invalid token: ' + token}, 400)
+                self.server.auth_failed = False
+                return self.reply({'access_token': 'fixture-only', 'expires_in': 3600})
             if self.server.auth_failed: return self.reply({'message': 'Device access denied'}, 401)
             if self.path == '/api/auth/websocket-ticket': return self.reply({'ticket': 'fixture-only'})
             if self.path == '/api/orchestration/dispatch':

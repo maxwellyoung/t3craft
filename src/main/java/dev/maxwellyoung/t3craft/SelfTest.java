@@ -14,7 +14,7 @@ import net.minecraft.world.entity.npc.villager.Villager;
  * {@code shared:<link>} pairs and places the dev server's shared village. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { STABLE_SITE, STABLE_CHURN, STABLE_CAPTURE, STABLE_OFFLINE, STABLE_RECOVER, STABLE_RESTORE, STABLE_ARCHIVE, SHARED_STABLE, SHARED_CHURN, SHARED_TARGET, SHARED_OPEN, SHARED_UNPIN, AUTH_ERROR, AUTH_RECOVER, PROTOCOL_ERROR, PROTOCOL_RECOVER, RELEASE_SITE, RELEASE_OPEN, RELEASE_CHECK, RELEASE_FEEDBACK, DESK_SITE, DESK_OPEN, DESK_REQUEST, DESK_ANSWERED, DESK_REVIEW_OPEN, DESK_REVIEW, DESK_DIFF, DESK_FEEDBACK, DESK_SIDEBAR, SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { SETUP_FORM, SETUP_INVALID, SETUP_EXPIRED, SETUP_A, SETUP_B, SETUP_AUTH, SETUP_WRONG, SETUP_REPAIRED, SETUP_REMOVED, SETUP_RETURN, SETUP_RESTORE, SETUP_LAST, SETUP_LIVE, STABLE_SITE, STABLE_CHURN, STABLE_CAPTURE, STABLE_OFFLINE, STABLE_RECOVER, STABLE_RESTORE, STABLE_ARCHIVE, SHARED_STABLE, SHARED_CHURN, SHARED_TARGET, SHARED_OPEN, SHARED_UNPIN, AUTH_ERROR, AUTH_RECOVER, PROTOCOL_ERROR, PROTOCOL_RECOVER, RELEASE_SITE, RELEASE_OPEN, RELEASE_CHECK, RELEASE_FEEDBACK, DESK_SITE, DESK_OPEN, DESK_REQUEST, DESK_ANSWERED, DESK_REVIEW_OPEN, DESK_REVIEW, DESK_DIFF, DESK_FEEDBACK, DESK_SIDEBAR, SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
@@ -23,6 +23,7 @@ final class SelfTest {
 	private int deadline = 20 * 600;
 	private int targetEntity;
 	private int pinnedDesk;
+	private T3ConnectionsScreen pendingPair;
 	private T3Office.Spot pinnedGoal;
 	private net.minecraft.world.phys.Vec3 sharedPosition;
 	private String targetThread;
@@ -48,6 +49,18 @@ final class SelfTest {
 		return prompt == null || prompt.isBlank() ? null : new SelfTest(mod, prompt);
 	}
 
+	private static void press(net.minecraft.client.gui.screens.Screen screen, String label) {
+		var button = screen.children().stream().filter(c -> c instanceof net.minecraft.client.gui.components.Button b && b.getMessage().getString().equals(label))
+			.map(c -> (net.minecraft.client.gui.components.Button) c).findFirst().orElseThrow();
+		if (!button.active) throw new IllegalStateException("QA button disabled: " + label);
+		click(screen, button.getX() + button.getWidth() / 2, button.getY() + button.getHeight() / 2);
+	}
+	private static void pasteLink(Minecraft minecraft, T3ConnectionsScreen screen, String value) {
+		String previous = minecraft.keyboardHandler.getClipboard();
+		try { minecraft.keyboardHandler.setClipboard(value); press(screen, "Paste link"); }
+		finally { minecraft.keyboardHandler.setClipboard(previous); }
+	}
+
 	private void fixtureControl(Minecraft minecraft, String action) {
 		mod.state().run(() -> {
 			var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:25682/_qa/" + action))
@@ -64,6 +77,88 @@ final class SelfTest {
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		T3State.ThreadRow row = snapshot.focusedRow();
 		switch (step) {
+			case SETUP_FORM -> {
+				if (ticks < 200) return;
+				if (!(minecraft.gui.screen() instanceof T3ConnectionsScreen screen) || !screen.formForTest()) { finish(minecraft, "FAIL private setup entry"); return; }
+				pasteLink(minecraft, screen, "invalid fixture-secret");
+				if (screen.privateNarrationForTest().contains("fixture-secret") || !screen.linkForTest().contains("fixture-secret")) { finish(minecraft, "FAIL private link narration/input"); return; }
+				shot(minecraft, "private-pairing-form"); press(screen, "Pair machine"); advance(Step.SETUP_INVALID, "malformed credential-bearing link");
+			}
+			case SETUP_INVALID -> {
+				if (ticks < 20 || !(minecraft.gui.screen() instanceof T3ConnectionsScreen screen) || !screen.messageForTest().contains("invalid")) return;
+				if (mod.paired() || screen.messageForTest().contains("fixture-secret")) { finish(minecraft, "FAIL invalid link leaked or saved"); return; }
+				pasteLink(minecraft, screen, "http://127.0.0.1:25682/pair#token=expired-fixture"); press(screen, "Pair machine");
+				advance(Step.SETUP_EXPIRED, "expired bootstrap link");
+			}
+			case SETUP_EXPIRED -> {
+				if (ticks < 20 || !(minecraft.gui.screen() instanceof T3ConnectionsScreen screen) || !screen.messageForTest().contains("fresh link")) return;
+				if (mod.paired() || screen.messageForTest().contains("expired-fixture")) { finish(minecraft, "FAIL expired link leaked or saved"); return; }
+				shot(minecraft, "expired-private-pairing"); pasteLink(minecraft, screen, "http://127.0.0.1:25682/pair#token=fixture-pairing"); press(screen, "Pair machine");
+				advance(Step.SETUP_A, "pairing A through actual paste and submit buttons");
+			}
+			case SETUP_A -> {
+				if (ticks < 40 || !(minecraft.gui.screen() instanceof T3ConnectionsScreen screen) || screen.formForTest() || !mod.state().online("A-done-0")) return;
+				if (mod.environments().size() != 1 || !screen.linkForTest().isEmpty()) { finish(minecraft, "FAIL first pairing save/credential clear"); return; }
+				press(screen, "Add machine"); pasteLink(minecraft, screen, "http://127.0.0.1:25683/pair#token=fixture-pairing"); press(screen, "Pair machine");
+				advance(Step.SETUP_B, "adding second machine");
+			}
+			case SETUP_B -> {
+				if (ticks < 40 || !(minecraft.gui.screen() instanceof T3ConnectionsScreen screen) || screen.formForTest() || !mod.state().online("B-done-0")) return;
+				if (!mod.state().online("A-done-0") || mod.environments().size() != 2) { finish(minecraft, "FAIL second pairing disrupted A"); return; }
+				mod.focus("B-done-0"); press(screen, "Done");
+				T3Screen panel = (T3Screen) minecraft.gui.screen(); panel.setComposerForTest("Keep my healthy-machine draft"); press(panel, "Pin desk"); press(panel, "Connections");
+				fixtureControl(minecraft, "auth-failed"); advance(Step.SETUP_AUTH, "failed A while B remains focused with a draft and pin");
+			}
+			case SETUP_AUTH -> {
+				if (ticks < 40 || mod.state().online("A-done-0") || mod.state().machines().stream().noneMatch(m -> m.owner().endsWith(":25682") && m.error() != null && m.error().contains("Settings > Connections"))) return;
+				if (!mod.state().online("B-done-0")) { finish(minecraft, "FAIL healthy peer offline"); return; }
+				T3ConnectionsScreen screen = (T3ConnectionsScreen) minecraft.gui.screen(); shot(minecraft, "machine-health-and-recovery");
+				press(screen, "Re-pair"); pasteLink(minecraft, screen, "http://127.0.0.1:25683/pair#token=fixture-pairing"); press(screen, "Pair machine");
+				advance(Step.SETUP_WRONG, "wrong-owner replacement must be refused");
+			}
+			case SETUP_WRONG -> {
+				if (ticks < 20 || !(minecraft.gui.screen() instanceof T3ConnectionsScreen screen) || !screen.messageForTest().contains("another machine")) return;
+				if (mod.environments().size() != 2 || mod.state().online("A-done-0")) { finish(minecraft, "FAIL wrong-owner re-pair changed machines"); return; }
+				pasteLink(minecraft, screen, "http://127.0.0.1:25682/pair#token=fixture-pairing"); press(screen, "Pair machine"); advance(Step.SETUP_REPAIRED, "correct fresh bootstrap repairs A");
+			}
+			case SETUP_REPAIRED -> {
+				if (ticks < 40 || !(minecraft.gui.screen() instanceof T3ConnectionsScreen screen) || screen.formForTest() || !mod.state().online("A-done-0")) return;
+				if (!mod.state().online("B-done-0") || mod.environments().size() != 2 || !mod.officePreferences().pins.stream().anyMatch(p -> p.threadId().equals("B-done-0"))) { finish(minecraft, "FAIL re-pair lost peer or pin"); return; }
+				press(screen, "Retry"); press(screen, "Remove"); press(screen, "Keep machine");
+				if (mod.environments().size() != 2) { finish(minecraft, "FAIL removal cancel"); return; }
+				press(screen, "Remove"); press(screen, "Remove locally"); advance(Step.SETUP_REMOVED, "removing only A through confirmation");
+			}
+			case SETUP_REMOVED -> {
+				if (ticks < 30 || mod.state().machines().size() != 1) return;
+				if (mod.environments().size() != 1 || !mod.state().online("B-done-0") || mod.state().apiFor("A-done-0") != null || !"B-done-0".equals(mod.state().focusedThreadId())) { finish(minecraft, "FAIL per-machine removal scope/focus"); return; }
+				press((T3ConnectionsScreen) minecraft.gui.screen(), "Done"); advance(Step.SETUP_RETURN, "returning to healthy machine draft");
+			}
+			case SETUP_RETURN -> {
+				if (ticks < 20) return;
+				if (!(minecraft.gui.screen() instanceof T3Screen screen) || !"Keep my healthy-machine draft".equals(screen.composerValueForTest())) { finish(minecraft, "FAIL connection management lost draft"); return; }
+				shot(minecraft, "connection-return-draft"); finish(minecraft, "PASS guided setup: private paste, malformed/expired link, two machines, wrong-owner refusal, re-pair/retry, confirmed/cancelled per-machine removal, healthy peer focus/draft/pin");
+			}
+			case SETUP_RESTORE -> {
+				if (ticks < 30) return;
+				if (mod.environments().size() != 1 || !mod.state().online("B-done-0") || mod.state().apiFor("A-done-0") != null || !mod.officePreferences().pins.stream().anyMatch(p -> p.threadId().equals("B-done-0"))) { finish(minecraft, "FAIL saved connections/pin restart"); return; }
+				T3ConnectionsScreen screen = (T3ConnectionsScreen) minecraft.gui.screen();
+				press(screen, "Add machine"); pasteLink(minecraft, screen, "http://127.0.0.1:25682/pair#token=delayed-fixture"); press(screen, "Pair machine"); pendingPair = screen; press(screen, "Back");
+				press((T3Screen) minecraft.gui.screen(), "Connections"); screen = (T3ConnectionsScreen) minecraft.gui.screen();
+				press(screen, "Remove"); press(screen, "Remove locally"); advance(Step.SETUP_LAST, "last removal during an unfinished pairing");
+			}
+			case SETUP_LAST -> {
+				if (ticks < 100 || !mod.state().machines().isEmpty() || pendingPair == null || !pendingPair.messageForTest().contains("Connections changed")) return;
+				if (mod.paired() || !snapshot.threads().isEmpty() || mod.state().focusedThreadId() != null) { finish(minecraft, "FAIL last removal retained access or focus"); return; }
+				press((T3ConnectionsScreen) minecraft.gui.screen(), "Done"); mod.openPanel();
+				if (!(minecraft.gui.screen() instanceof T3ConnectionsScreen screen) || !screen.formForTest()) { finish(minecraft, "FAIL last removal cannot re-enter setup"); return; }
+				shot(minecraft, "unpaired-ready-to-connect"); finish(minecraft, "PASS restart restored only retained machine and pin; late pairing cannot resurrect a removed machine; last removal clears access/focus and returns to guided setup");
+			}
+			case SETUP_LIVE -> {
+				if (ticks < 60 || mod.state().machines().isEmpty()) return;
+				if (mod.state().machines().stream().anyMatch(m -> !m.online() || m.protocol() != 2)) { finish(minecraft, "FAIL existing real T3 health"); return; }
+				shot(minecraft, "existing-live-machine-health"); finish(minecraft, "PASS existing real T3 protocol-2 health in Connections; no fresh pairing or agent dispatch");
+			}
+
 			case STABLE_SITE -> {
 				if (ticks < 220 || mod.office().building()) return;
 				OfficeBrain.Agent pin = mod.village().brainForTest().agents().get("A-done-0");
@@ -805,6 +900,18 @@ final class SelfTest {
 				finish(minecraft, "half-written prompt".equals(value) ? "PASS (pair + draft)" : "FAIL draft was '" + value + "'");
 			}
 			case WAIT_WORLD -> {
+				if (prompt.startsWith("guided-")) {
+					if (minecraft.player == null || ticks <= 140) return;
+					if ("guided-connections".equals(prompt)) {
+						if (mod.paired()) { finish(minecraft, "FAIL onboarding requires an empty disposable config"); return; }
+						mod.openPanel(); advance(Step.SETUP_FORM, "unpaired open key path reaches private form");
+					} else if ("guided-restore".equals(prompt) && snapshot.connected()) {
+						mod.openConnections(); advance(Step.SETUP_RESTORE, "checking saved machine and pin after restart");
+					} else if ("guided-live".equals(prompt) && snapshot.connected()) {
+						mod.openConnections(); advance(Step.SETUP_LIVE, "read-only existing T3 machine health");
+					}
+					return;
+				}
 				if (minecraft.player != null && snapshot.connected() && !snapshot.threads().isEmpty() && ticks > 100 && prompt.startsWith("new:")) {
 					advance(Step.PREP, "world ready; clearing a view for the build");
 				} else if (minecraft.player != null && snapshot.connected() && !snapshot.threads().isEmpty() && ticks > 100) {

@@ -115,3 +115,10 @@ tasks.register('officeCheck', JavaExec) {
 	classpath = sourceSets.smoke.runtimeClasspath
 	mainClass = 'dev.maxwellyoung.t3craft.OfficeChecks'
 }
+
+tasks.register('connectionCheck', JavaExec) {
+	description = 'Private pairing errors, per-machine changes and cached peer continuity against loopback fixtures.'
+	classpath = sourceSets.smoke.runtimeClasspath
+	mainClass = 'dev.maxwellyoung.t3craft.ConnectionChecks'
+	args = [project.findProperty('fixturePort') ?: '25680']
+}

@@ -4,7 +4,7 @@
 
 ![A real T3 checkpoint reviewed in Minecraft, with changed files and its Git patch](docs/checkpoint-review.png)
 
-A release jar for ordinary Fabric profiles, with a personal client office or an operator-owned shared server office. [Download 0.3.0](https://github.com/maxwellyoung/t3craft/releases/tag/v0.3.0).
+A release jar for ordinary Fabric profiles, with a personal client office or an operator-owned shared server office. [Download 0.4.0](https://github.com/maxwellyoung/t3craft/releases/tag/v0.4.0).
 
 ![What it built, with the single "Done" toast](docs/agent-build.jpg)
 
@@ -26,7 +26,7 @@ It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3
 
 ![Approving a command from inside the game](docs/approval.jpg)
 
-Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 decisions` · `/t3 review` · `/t3 threads` · `/t3 use <n>` · `/t3 ask <prompt>` · `/t3 new <prompt>` · `/t3 approve` · `/t3 deny` · `/t3 stop` · `/t3 pin` (toggle focused thread) · `/t3 pins` · `/t3 village [off]` · `/t3 books on|off` · `/t3 agent-build on|off`
+Commands: `/t3` (open the panel) · `/t3 connections` · `/t3 pair <link>` · `/t3 unpair` · `/t3 decisions` · `/t3 review` · `/t3 threads` · `/t3 use <n>` · `/t3 ask <prompt>` · `/t3 new <prompt>` · `/t3 approve` · `/t3 deny` · `/t3 stop` · `/t3 pin` (toggle focused thread) · `/t3 pins` · `/t3 village [off]` · `/t3 books on|off` · `/t3 agent-build on|off`
 
 ## Office
 
@@ -47,6 +47,18 @@ Press **J**, run `/t3 decisions`, or right-click the office whiteboard to see pe
 Use **Review** in the thread header, `/t3 review`, or the office lectern to inspect the latest ready checkpoint. Choose a file for its complete Git patch, including deletions, rename metadata and binary-file notices. Arrow keys scroll or pan; **Home** resets the view and **F5** refreshes. The displayed agent reply is matched to the checkpoint; if it falls outside recent history the screen says so. **Give feedback** opens that thread's composer and preserves any existing unsent draft. This screen does not apply or merge changes, and does not imply tests passed.
 
 Tested against legacy and protocol 2 fixtures, plus the installed T3 Code nightly with live streams, a real agent edit, approvals and checkpoint retrieval. The client sends the required protocol 2 header, adapts run projections and uses RPC dispatch on current nightlies. Older servers retain their HTTP dispatch path.
+
+## Guided connections (0.4.0)
+
+The next version opens a private pairing form when you press **`** or run `/t3` while unpaired. In T3 Code, create a pairing link under **Settings > Connections**, then choose **Paste link** and **Pair machine**. The value is hidden from the screen and narration, and never enters Minecraft chat through this form. A machine name is optional.
+
+Use **Connections** in the panel or `/t3 connections` to add machines, see live/polling health, retry one connection or replace an expired pairing. **Re-pair** accepts only the selected machine's address; use **Add machine** for a different address. Removing one machine asks for confirmation and preserves the others' sockets, focused conversation, draft and pins. Removal is local only: revoke the Minecraft device in that machine's T3 settings separately. Saved pins remain available if the same address is paired again. Shared server pairings remain operator-owned.
+
+Pairing checks protocol compatibility before exchanging the bootstrap link. Errors never include the pasted credential or an echoed token from the pairing server. Config replacements are created with owner-only permissions on POSIX systems; failed saves are reported without changing the active pairings. Windows uses the user profile directory ACLs.
+
+![Guided connection recovery in Minecraft](docs/guided-connections.png)
+
+Actual Minecraft capture with synthetic loopback machines: one expired pairing and one healthy peer. No real credentials or conversations are shown.
 
 ## Install and pair
 
@@ -69,7 +81,7 @@ Set up T3 Craft (https://github.com/maxwellyoung/t3craft) on this machine so I c
    Remove older t3craft-*.jar and fabric-api-*.jar files there. Leave my other mods alone, and delete anything else you downloaded.
 4. If you support MCP servers, add one named "minecraft" at http://127.0.0.1:25590/mcp (streamable HTTP; it only answers while Minecraft is running). For Claude Code:
    claude mcp add --transport http -s user minecraft http://127.0.0.1:25590/mcp
-5. Then tell me the steps only I can do: in the Minecraft Launcher, play the fabric-loader-…-26.3 profile; in T3 Code, create a pairing link under Settings → Connections; in game, run /t3 pair <link> and press ` to open the panel. Never ask me to paste the pairing link or any token to you.
+5. Then tell me the steps only I can do: in the Minecraft Launcher, play the fabric-loader-…-26.3 profile; in T3 Code, create a pairing link under Settings → Connections; in game, press ` to open setup and paste the full pairing link into the private form. Never ask me to paste the pairing link or any token to you.
 ```
 
 Or by hand:
@@ -181,6 +193,8 @@ While the isolated Minecraft client is running, `python3 scripts/check-mcp.py` v
 
 With protocol 2 fixtures reset and a disposable server running, `./gradlew runClient -Pselftest=connection-errors -Pjoin=localhost:25690 -Pconfig=<fixture-config>` verifies visible per-machine recovery guidance, reconnection and preserved drafts in the actual game. It requires the isolated fixtures on 25682/25683.
 
+`./gradlew connectionCheck` tests private pairing errors, the protocol gate, token exchange, empty-machine health and targeted machine changes against those fixtures. Repeat with `-PfixturePort=25682` for protocol 2. `guided-connections` in Minecraft starts from an empty disposable config, drives the real Paste/Pair/Add/Re-pair/Retry/Remove buttons and verifies preservation of a healthy machine's draft and pin. Restart with `guided-restore` to verify the retained pairing and pin, then remove the last machine while another pairing is unfinished; its late callback must not restore access. `guided-live` only displays health from an existing pairing and sends no agent commands. Fresh pairing against an actual T3 instance requires a human-created link; fixture proof is separate from live onboarding proof.
+
 The `stable-office` self-test uses protocol 2 fixtures on 25682/25683 and a disposable world to pin through the actual button, build the office, add six newer threads, and check the same desk/entity plus project filtering and draft preservation. It logs the saved desk index. Restart with `stable-office-restore` and `-PexpectedDesk=<index>` to check persistence, archived resident removal and safe unpinning. The `stable-shared` test requires that disposable server also paired to the fixture; it exercises operator pin/unpin, spatial continuity and physically opening a shared resident without a local village. Reset fixtures between independent scenarios.
 
 For the game walkthrough, use a disposable creative dev server with `Player` opped. Reset both fixtures after the Java checks, then join that server:
@@ -199,7 +213,6 @@ The walkthrough builds an office in that test world, enters through the whiteboa
 
 ## What comes next
 
-- Guided machine connections and re-pairing, with clear health and expiry recovery.
 - More readable activity and checkpoint navigation, using actual backend events and test receipts.
 - A short actual-game demonstration and broader distribution after ordinary-launcher installation checks.
 

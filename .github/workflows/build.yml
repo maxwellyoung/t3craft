@@ -22,8 +22,8 @@ jobs:
           python3 scripts/feature-fixture.py --protocol2 --port 25682 &
           fixture_v2_pid=$!
           trap 'kill "$fixture_legacy_pid" "$fixture_v2_pid"' EXIT
-          ./gradlew officeCheck featureCheck build
-          ./gradlew featureCheck -PfixturePort=25682
+          ./gradlew officeCheck connectionCheck featureCheck build
+          ./gradlew connectionCheck featureCheck -PfixturePort=25682
           ./gradlew reliabilityCheck
           ./gradlew reliabilityCheck -PfixturePort=25682
           python3 scripts/check-launcher.py
