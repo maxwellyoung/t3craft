@@ -57,8 +57,9 @@ final class VillageLayout {
 	}
 
 	/** Title and status; a waiting thread also says what it's asking, once known. */
-	static Component label(T3State.ThreadRow row, String waitingDetail) {
+	static Component label(T3State.ThreadRow row, String waitingDetail, boolean online) {
 		String title = row.title().length() > 32 ? row.title().substring(0, 31) + "…" : row.title();
+		if (!online) return Component.literal("Offline · " + title).withColor(0xFF9CA3AF);
 		String status = label(row.status());
 		if (row.status() == T3State.Status.WORKING) status += " " + elapsed(row.workingSince());
 		if (row.status() == T3State.Status.NEEDS_YOU && waitingDetail != null && !waitingDetail.isBlank()) {

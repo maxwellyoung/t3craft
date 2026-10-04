@@ -14,7 +14,7 @@ import net.minecraft.world.entity.npc.villager.Villager;
  * {@code shared:<link>} pairs and places the dev server's shared village. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { AUTH_ERROR, AUTH_RECOVER, PROTOCOL_ERROR, PROTOCOL_RECOVER, RELEASE_SITE, RELEASE_OPEN, RELEASE_CHECK, RELEASE_FEEDBACK, DESK_SITE, DESK_OPEN, DESK_REQUEST, DESK_ANSWERED, DESK_REVIEW_OPEN, DESK_REVIEW, DESK_DIFF, DESK_FEEDBACK, DESK_SIDEBAR, SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { STABLE_SITE, STABLE_CHURN, STABLE_CAPTURE, STABLE_OFFLINE, STABLE_RECOVER, STABLE_RESTORE, STABLE_ARCHIVE, SHARED_STABLE, SHARED_CHURN, SHARED_TARGET, SHARED_OPEN, SHARED_UNPIN, AUTH_ERROR, AUTH_RECOVER, PROTOCOL_ERROR, PROTOCOL_RECOVER, RELEASE_SITE, RELEASE_OPEN, RELEASE_CHECK, RELEASE_FEEDBACK, DESK_SITE, DESK_OPEN, DESK_REQUEST, DESK_ANSWERED, DESK_REVIEW_OPEN, DESK_REVIEW, DESK_DIFF, DESK_FEEDBACK, DESK_SIDEBAR, SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
@@ -22,6 +22,9 @@ final class SelfTest {
 	private int ticks;
 	private int deadline = 20 * 600;
 	private int targetEntity;
+	private int pinnedDesk;
+	private T3Office.Spot pinnedGoal;
+	private net.minecraft.world.phys.Vec3 sharedPosition;
 	private String targetThread;
 	private String chosen;
 	private boolean inWorld;
@@ -61,6 +64,113 @@ final class SelfTest {
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		T3State.ThreadRow row = snapshot.focusedRow();
 		switch (step) {
+			case STABLE_SITE -> {
+				if (ticks < 220 || mod.office().building()) return;
+				OfficeBrain.Agent pin = mod.village().brainForTest().agents().get("A-done-0");
+				if (pin == null || !mod.village().brainForTest().agents().containsKey("A-waiting") || !mod.village().brainForTest().agents().containsKey("B-waiting")) {
+					finish(minecraft, "FAIL pinned/waiting residents missing"); return;
+				}
+				pinnedDesk = pin.desk; pinnedGoal = pin.goal; targetEntity = villagerFor(minecraft, "A-done-0").getId();
+				fixtureControl(minecraft, "churn"); advance(Step.STABLE_CHURN, "six newer threads arrived");
+			}
+			case STABLE_CHURN -> {
+				if (ticks < 60 || snapshot.threads().size() != 32) return;
+				OfficeBrain.Agent pin = mod.village().brainForTest().agents().get("A-done-0");
+				if (pin == null || pin.desk != pinnedDesk || !pin.goal.equals(pinnedGoal) || villagerFor(minecraft, "A-done-0").getId() != targetEntity) {
+					finish(minecraft, "FAIL churn moved pinned desk or replaced villager"); return;
+				}
+				T3Screen screen = (T3Screen) minecraft.gui.screen();
+				click(screen, 30, 55); // Real project filter row under the machine filter.
+				if (screen.sidebarCountForTest() >= 32 || screen.sidebarCountForTest() == 0 || !"A-done-0".equals(mod.state().focusedThreadId()) || !"Office QA draft".equals(screen.composerValueForTest())) {
+					finish(minecraft, "FAIL project filter changed focus/draft or mixed projects"); return;
+				}
+				advance(Step.STABLE_CAPTURE, "project filter kept focused thread and draft");
+			}
+			case STABLE_CAPTURE -> {
+				if (ticks < 10) return;
+				shot(minecraft, "stable-office-project-filter");
+				fixtureControl(minecraft, "auth-failed"); advance(Step.STABLE_OFFLINE, "checking pinned identity through reconnect");
+			}
+			case STABLE_OFFLINE -> {
+				if (ticks < 60 || mod.state().online("A-done-0")) return;
+				Villager pin = villagerFor(minecraft, "A-done-0");
+				if (pin == null || pin.getId() != targetEntity || pin.getCustomName() == null || !pin.getCustomName().getString().startsWith("Offline")) {
+					finish(minecraft, "FAIL offline pinned resident identity/label"); return;
+				}
+				shot(minecraft, "pinned-connection-recovery"); fixtureControl(minecraft, "reset");
+				advance(Step.STABLE_RECOVER, "offline pin retained with explicit offline label");
+			}
+			case STABLE_RECOVER -> {
+				if (ticks < 40 || !mod.state().online("A-done-0")) return;
+				OfficeBrain.Agent pin = mod.village().brainForTest().agents().get("A-done-0");
+				if (pin == null || pin.desk != pinnedDesk || villagerFor(minecraft, "A-done-0").getId() != targetEntity || !(minecraft.gui.screen() instanceof T3Screen screen) || !"Office QA draft".equals(screen.composerValueForTest())) {
+					finish(minecraft, "FAIL reconnect changed pinned desk/entity or draft"); return;
+				}
+				T3CraftClient.LOGGER.info("SELFTEST saved pinned desk {}", pinnedDesk);
+				finish(minecraft, "PASS stable office: pinned/waiting residents, same desk/entity through recency churn and reconnect, offline label, owner project filter and preserved draft");
+			}
+			case STABLE_RESTORE -> {
+				if (ticks < 40) return;
+				OfficeBrain.Agent pin = mod.village().brainForTest().agents().get("A-done-0");
+				int expected = Integer.getInteger("t3craft.expectedDesk", -1);
+				if (pin == null || pin.desk != expected || !mod.officePreferences().pins.stream().anyMatch(p -> p.threadId().equals("A-done-0"))) {
+					finish(minecraft, "FAIL restarted client lost pinned desk"); return;
+				}
+				minecraft.gui.setScreen(new T3PinsScreen(mod)); fixtureControl(minecraft, "archive-pin");
+				advance(Step.STABLE_ARCHIVE, "restart restored exact desk; checking unavailable pin removal");
+			}
+			case STABLE_ARCHIVE -> {
+				if (ticks < 60 || snapshot.threads().stream().anyMatch(r -> r.id().equals("A-done-0"))) return;
+				if (mod.village().brainForTest().agents().containsKey("A-done-0") || !(minecraft.gui.screen() instanceof T3PinsScreen screen)) {
+					finish(minecraft, "FAIL archived resident remained"); return;
+				}
+				shot(minecraft, "unavailable-pin");
+				click(screen, screen.width - 104, 56); // Unavailable Open is disabled.
+				if (!(minecraft.gui.screen() instanceof T3PinsScreen)) { finish(minecraft, "FAIL archived pin reopened a thread"); return; }
+				click(screen, screen.width - 48, 56);
+				if (!mod.officePreferences().pins.isEmpty()) { finish(minecraft, "FAIL unavailable pin cannot be removed"); return; }
+				finish(minecraft, "PASS restarted office: exact pinned desk restored, archived resident removed, unavailable pin safely unpinned");
+			}
+			case SHARED_STABLE -> {
+				if (ticks < 500) return;
+				Villager pin = sharedVillager(minecraft, "A-done-0");
+				if (pin == null) { finish(minecraft, "FAIL shared pin missing"); return; }
+				sharedPosition = pin.position(); fixtureControl(minecraft, "churn");
+				advance(Step.SHARED_CHURN, "operator-owned resident settled; churning threads");
+			}
+			case SHARED_CHURN -> {
+				if (ticks < 160 || snapshot.threads().size() != 32) return;
+				Villager pin = sharedVillager(minecraft, "A-done-0");
+				if (pin == null || pin.position().distanceToSqr(sharedPosition) > 0.001 || !mod.officePreferences().pins.isEmpty()) {
+					finish(minecraft, "FAIL shared pin moved or leaked into client preferences"); return;
+				}
+				shot(minecraft, "shared-stable-office");
+				minecraft.player.connection.sendCommand("tp @s " + pin.getX() + " " + Math.ceil(pin.getY()) + " " + (pin.getZ() + 2.5));
+				advance(Step.SHARED_TARGET, "checking shared resident without a local village");
+			}
+			case SHARED_TARGET -> {
+				if (ticks < 20) return;
+				Villager pin = sharedVillager(minecraft, "A-done-0");
+				if (pin == null) { finish(minecraft, "FAIL shared resident vanished"); return; }
+				minecraft.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, pin.getEyePosition());
+				if (!(minecraft.hitResult instanceof net.minecraft.world.phys.EntityHitResult hit) || !hit.getEntity().getUUID().equals(pin.getUUID())) {
+					if (ticks > 140) { shot(minecraft, "shared-resident-target-failure"); finish(minecraft, "FAIL shared resident ray"); } return;
+				}
+				net.minecraft.client.KeyMapping.click(minecraft.options.keyUse.getDefaultKey());
+				advance(Step.SHARED_OPEN, "physical shared villager click");
+			}
+			case SHARED_OPEN -> {
+				if (ticks < 30) return;
+				if (!(minecraft.gui.screen() instanceof T3Screen) || !"A-done-0".equals(mod.state().focusedThreadId())) { finish(minecraft, "FAIL shared villager interaction without local anchor"); return; }
+				shot(minecraft, "shared-resident-panel"); minecraft.gui.setScreen(null);
+				minecraft.player.connection.sendCommand("t3office unpin A-done-0");
+				advance(Step.SHARED_UNPIN, "shared resident opened its owned thread");
+			}
+			case SHARED_UNPIN -> {
+				if (ticks < 60) return;
+				if (sharedVillager(minecraft, "A-done-0") != null) { finish(minecraft, "FAIL shared unpin did not release old resident"); return; }
+				finish(minecraft, "PASS shared office: operator pin survives newer threads, client preferences independent, physical resident opens its owned thread without local village; operator unpin removes displaced resident");
+			}
 			case AUTH_ERROR -> {
 				String error = mod.state().connectionError("A-done-0");
 				if (ticks < 30 || error == null || !error.contains("Settings > Connections")) return;
@@ -702,6 +812,27 @@ final class SelfTest {
 				}
 			}
 			case OPEN -> {
+				if (prompt.startsWith("stable-office") || "stable-shared".equals(prompt)) {
+					if (ticks < 160) return;
+					if (!snapshot.threads().stream().anyMatch(t -> t.id().equals("A-done-0") && t.projectTitle().equals("Greeting fixture"))) {
+						finish(minecraft, "FAIL stable office tests require isolated fixtures"); return;
+					}
+					if ("stable-office-restore".equals(prompt)) { advance(Step.STABLE_RESTORE, "checking saved identity after client restart"); return; }
+					if ("stable-shared".equals(prompt)) {
+						minecraft.player.connection.sendCommand("t3office build");
+						minecraft.player.connection.sendCommand("t3office pin A-done-0");
+						advance(Step.SHARED_STABLE, "building operator-owned shared office"); return;
+					}
+					mod.focus("A-done-0"); mod.openPanel();
+					T3Screen screen = (T3Screen) minecraft.gui.screen(); screen.setComposerForTest("Office QA draft");
+					click(screen, 40, screen.height - 49);
+					if (!mod.pinned(snapshot.threads().stream().filter(r -> r.id().equals("A-done-0")).findFirst().orElseThrow())) {
+						finish(minecraft, "FAIL Pin desk button"); return;
+					}
+					minecraft.player.connection.sendCommand("gamemode creative"); mod.buildOffice();
+					advance(Step.STABLE_SITE, "pinned old thread through panel and built office"); return;
+				}
+
 				if ("connection-errors".equals(prompt)) {
 					if (ticks < 160) return; // Let Minecraft's first-join chat warning leave the screenshot.
 					if (snapshot.threads().size() != 26 || !snapshot.threads().stream().anyMatch(t -> t.id().equals("A-done-0") && t.projectTitle().equals("Greeting fixture"))) {
@@ -987,6 +1118,15 @@ final class SelfTest {
 				}
 			}
 		}
+	}
+
+	private static void click(net.minecraft.client.gui.screens.Screen screen, double x, double y) {
+		screen.mouseClicked(new net.minecraft.client.input.MouseButtonEvent(x, y,
+			new net.minecraft.client.input.MouseButtonInfo(com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT, 0)), false);
+	}
+	private static Villager sharedVillager(Minecraft minecraft, String thread) {
+		for (var entity : minecraft.level.entitiesForRendering()) if (entity instanceof Villager v && OfficeBrain.villagerUuid(thread).equals(v.getUUID())) return v;
+		return null;
 	}
 
 	private Villager villagerFor(Minecraft minecraft, String threadId) {

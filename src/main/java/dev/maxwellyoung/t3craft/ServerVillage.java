@@ -65,7 +65,7 @@ final class ServerVillage {
 			for (Villager villager : villagers.values()) face(level, villager);
 		}
 		if (ticks % 8 == 0) {
-			for (Map.Entry<String, Villager> entry : villagers.entrySet()) effects(level, entry.getValue(), row(entry.getKey()));
+			for (Map.Entry<String, Villager> entry : villagers.entrySet()) if (state.online(entry.getKey())) effects(level, entry.getValue(), row(entry.getKey()));
 		}
 	}
 
@@ -102,7 +102,7 @@ final class ServerVillage {
 				villager.snapTo(column.getX() + 0.5, y, column.getZ() + 0.5, villager.getYRot(), 0);
 			}
 			villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(), VillageLayout.outfit(row)).withLevel(5));
-			villager.setCustomName(VillageLayout.label(row, state.waitingDetail(row.id())));
+			villager.setCustomName(VillageLayout.label(row, state.waitingDetail(row.id()), state.online(row.id())));
 		}
 		villagers.entrySet().removeIf(entry -> {
 			if (keep.contains(entry.getKey())) return false;

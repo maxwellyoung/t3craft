@@ -146,8 +146,28 @@ public final class T3CraftClient implements ClientModInitializer {
 
 	/** One office floor per paired machine, bottom up. */
 	List<String> floors() {
-		return config.environments.stream().map(e -> e.label).toList();
+		return config.environments.stream().map(e -> config.labelFor(T3Config.ownerKey(e.baseUrl))).toList();
 	}
+
+	List<String> floorOwners() { return config.environments.stream().map(e -> T3Config.ownerKey(e.baseUrl)).toList(); }
+
+	OfficeRoster.Preferences officePreferences() {
+		String world = worldKey();
+		return world == null ? new OfficeRoster.Preferences() : config.officePreferences.computeIfAbsent(world, k -> new OfficeRoster.Preferences());
+	}
+
+	boolean canPin() { return worldKey() != null; }
+	void saveOfficePreferences() { config.save(configPath); }
+	boolean pinned(T3State.ThreadRow row) { return row != null && officePreferences().pinned(row); }
+	void togglePin(T3State.ThreadRow row) {
+		if (row == null || !canPin()) return;
+		OfficeRoster.Preferences prefs = officePreferences();
+		if (prefs.pinned(row)) prefs.pins.removeIf(p -> p.key().equals(OfficeRoster.key(row)));
+		else if (!prefs.pin(row)) { chat(Component.literal("All eight desks on this machine are pinned. Unpin one in Pins first.")); return; }
+		saveOfficePreferences();
+	}
+	void unpin(OfficeRoster.Pin pin) { officePreferences().unpin(pin); saveOfficePreferences(); }
+	String machineLabel(String owner) { return config.labelFor(owner); }
 
 	/** This world's village is the Silk office. */
 	boolean officeMode() {
@@ -373,6 +393,8 @@ public final class T3CraftClient implements ClientModInitializer {
 			.then(literal("books")
 				.then(literal("on").executes(ctx -> setBooks(true)))
 				.then(literal("off").executes(ctx -> setBooks(false))))
+			.then(literal("pin").executes(ctx -> { togglePin(state.snapshot().focusedRow()); return 1; }))
+			.then(literal("pins").executes(ctx -> { Minecraft.getInstance().gui.setScreen(new T3PinsScreen(this)); return 1; }))
 			.then(literal("office").executes(ctx -> {
 				buildOffice();
 				chat(Component.literal("Building suite 408 in front of you. Your agents move in once it's done: working ones at the table, "

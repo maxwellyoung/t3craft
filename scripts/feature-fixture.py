@@ -84,13 +84,14 @@ class Fixture(ThreadingHTTPServer):
     def reset(self):
         self.threads = {f'{self.machine}-done-{i}': thread(f'{self.machine}-done-{i}') for i in range(12)}
         self.threads[f'{self.machine}-waiting'] = thread(f'{self.machine}-waiting', True, self.machine == 'B', True)
+        self.threads[f'{self.machine}-done-11']['projectId'] = 'fixture-alt'
         self.dispatches.clear()
         self.offline = False
         self.auth_failed = False
         self.protocol_version = 2 if self.protocol2 else 1
 
     def shell(self):
-        return {'schemaVersion': 2 if self.protocol2 else 1, 'projects': [{'id': 'fixture-project', 'title': 'Greeting fixture'}], 'threads': [shell_thread(t) if self.protocol2 else t for t in self.threads.values()]}
+        return {'schemaVersion': 2 if self.protocol2 else 1, 'projects': [{'id': 'fixture-project', 'title': 'Greeting fixture'}, {'id': 'fixture-alt', 'title': 'Second project'}], 'threads': [shell_thread(t) if self.protocol2 else t for t in self.threads.values()]}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -116,7 +117,23 @@ class Handler(BaseHTTPRequestHandler):
                     except OSError: pass
                 return self.reply({'ok': True})
             if self.path == '/_qa/dispatches': return self.reply(self.server.dispatches)
-            if self.path == '/_qa/reset': self.server.reset(); return self.reply({'ok': True})
+            if self.path == '/_qa/reset': self.server.reset(); self.broadcast_snapshot(); return self.reply({'ok': True})
+            if self.path == '/_qa/collision':
+                self.server.threads['A-done-0'] = thread('A-done-0')
+                self.broadcast_snapshot()
+                return self.reply({'ok': True})
+            if self.path == '/_qa/churn':
+                self.server.threads[f'{self.server.machine}-done-0']['updatedAt'] = '2020-01-01T00:00:00Z'
+                for i in range(6):
+                    ident = f'{self.server.machine}-new-{i}'
+                    self.server.threads[ident] = thread(ident)
+                self.broadcast_snapshot()
+                return self.reply({'ok': True})
+            if self.path == '/_qa/archive-pin':
+                target = self.server.threads[f'{self.server.machine}-done-0']
+                target['archivedAt'] = datetime.now(timezone.utc).isoformat()
+                self.broadcast_snapshot()
+                return self.reply({'ok': True})
             if self.path == '/_qa/offline':
                 self.server.offline = True
                 for connection in list(self.server.connections):
@@ -153,6 +170,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.dispatch(command)
                 return self.reply({'sequence': len(self.server.dispatches)})
         self.reply({'message': 'Unknown route'}, 404)
+
+    def broadcast_snapshot(self):
+        for handler, ident in list(self.server.subscribers.items()):
+            try: handler.frame({'_tag': 'Chunk', 'requestId': ident, 'values': [{'kind': 'snapshot', 'snapshot': self.server.shell()}]})
+            except OSError: pass
 
     def dispatch(self, command):
         self.server.dispatches.append(command)

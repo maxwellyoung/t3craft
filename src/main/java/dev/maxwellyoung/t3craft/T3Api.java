@@ -39,9 +39,11 @@ public final class T3Api {
 	private volatile int wireProtocol;
 
 	public T3Api(String baseUrl, String accessToken) {
-		this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+		this.baseUrl = T3Config.ownerKey(baseUrl);
 		this.accessToken = accessToken;
 	}
+
+	String ownerKey() { return baseUrl; }
 
 	public record Pairing(String baseUrl, String accessToken, long expiresInSeconds) {}
 

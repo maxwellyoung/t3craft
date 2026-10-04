@@ -31,7 +31,7 @@ import java.util.function.Consumer;
 public final class T3State {
 	public enum Status { IDLE, WORKING, NEEDS_YOU, DONE, ERROR }
 
-	public record ThreadRow(String id, String title, String projectTitle, String environment, Status status,
+	public record ThreadRow(String id, String title, String projectTitle, String environment, String ownerKey, Status status,
 		Instant workingSince, String step, JsonObject raw) {}
 
 	public record Message(String role, String text, boolean streaming) {}
@@ -148,7 +148,12 @@ public final class T3State {
 	private Env envFor(String threadId) {
 		List<Env> current = envs;
 		if (threadId != null) {
-			for (Env env : current) if (env.threads.containsKey(threadId)) return env;
+			Env owner = null;
+			for (Env env : current) if (env.threads.containsKey(threadId)) {
+				if (owner != null) return null; // A copied environment must never route a shared id to the first machine.
+				owner = env;
+			}
+			return owner;
 		}
 		return threadId != null || current.isEmpty() ? null : current.getFirst();
 	}
@@ -500,7 +505,7 @@ public final class T3State {
 		for (Env env : current) {
 			String label = current.size() > 1 ? env.label : null;
 			for (JsonObject thread : env.threads.values()) {
-				if (isNull(thread, "archivedAt")) rows.add(row(thread, env.projectTitles, label));
+				if (isNull(thread, "archivedAt")) rows.add(row(thread, env.projectTitles, label, env.api.ownerKey()));
 			}
 		}
 		return rows;
@@ -560,8 +565,13 @@ public final class T3State {
 		Map<String, Boolean> health = new HashMap<>();
 		Map<String, String> errors = new HashMap<>();
 		for (Env env : current) for (String id : env.threads.keySet()) {
-			health.put(id, env.error == null);
-			if (env.error != null) errors.put(id, env.error);
+			if (health.containsKey(id)) {
+				health.put(id, false);
+				errors.put(id, "This thread ID appears on multiple machines. Open it directly in T3 and remove the duplicate pairing before reconnecting.");
+			} else {
+				health.put(id, env.error == null);
+				if (env.error != null) errors.put(id, env.error);
+			}
 		}
 		onlineThreads = Map.copyOf(health);
 		connectionErrors = Map.copyOf(errors);
@@ -572,7 +582,7 @@ public final class T3State {
 		events.forEach(onEvent);
 	}
 
-	private static ThreadRow row(JsonObject thread, Map<String, String> projectTitles, String environment) {
+	private static ThreadRow row(JsonObject thread, Map<String, String> projectTitles, String environment, String ownerKey) {
 		JsonObject latestTurn = object(thread, "latestTurn");
 		JsonObject session = object(thread, "session");
 		String turnState = latestTurn == null ? null : string(latestTurn, "state");
@@ -594,7 +604,7 @@ public final class T3State {
 		JsonObject plan = object(thread, "planProgress");
 		String step = plan == null ? null : string(plan, "step");
 		return new ThreadRow(thread.get("id").getAsString(), string(thread, "title"),
-			projectTitles.getOrDefault(string(thread, "projectId"), "?"), environment, status, since, step, thread);
+			projectTitles.getOrDefault(string(thread, "projectId"), "?"), environment, ownerKey, status, since, step, thread);
 	}
 
 	static Focus focus(JsonObject thread) {

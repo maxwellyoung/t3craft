@@ -49,7 +49,11 @@ public final class FeatureChecks {
 		check(state.online("B-waiting"), "healthy machine remains available when A disconnects");
 		get(a + "/_qa/reset");
 		waitFor(() -> state.online("A-waiting") && state.decisions().stream().anyMatch(e -> e.thread().id().equals("A-waiting") && e.requestId() != null));
-		System.out.println("PASS decision reachability, exact request routing, stale/offline rejection, reconnect recovery, checkpoint RPC, deletion/binary/rename/no-change patches");
+		get(b + "/_qa/collision");
+		waitFor(() -> state.apiFor("A-done-0") == null && !state.online("A-done-0") && state.connectionError("A-done-0") != null);
+		check(state.connectionError("A-done-0").contains("multiple machines"), "cloned thread identity refuses ambiguous routing with guidance");
+		get(a + "/_qa/reset"); get(b + "/_qa/reset");
+		System.out.println("PASS decision reachability, exact request routing, stale/offline rejection, reconnect recovery, ambiguous-owner refusal, checkpoint RPC, deletion/binary/rename/no-change patches");
 		System.exit(0);
 	}
 	private static Exception respond(T3State state, String thread, JsonObject answers) throws Exception {

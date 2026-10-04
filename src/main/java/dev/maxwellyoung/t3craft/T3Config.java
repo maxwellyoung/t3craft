@@ -40,6 +40,10 @@ public final class T3Config {
 	public java.util.Set<String> officeWorlds = new java.util.HashSet<>();
 	/** Server: where the shared Silk office stands; null when it's off. */
 	public int[] serverOffice;
+	/** Client spatial preferences, independently saved per world and dimension. */
+	public java.util.Map<String, OfficeRoster.Preferences> officePreferences = new java.util.HashMap<>();
+	/** Operator-owned shared office preferences; independent of client worlds. */
+	public OfficeRoster.Preferences sharedOfficePreferences = new OfficeRoster.Preferences();
 	/** Hand the player a written report when a watched thread finishes (needs command permission). */
 	public boolean books = true;
 	/** Lets local agents run commands through the MCP server. Off until the player opts in. */
@@ -51,8 +55,24 @@ public final class T3Config {
 
 	/** Adds or refreshes the environment at {@code baseUrl}. */
 	public void upsert(Environment environment) {
-		environments.removeIf(existing -> existing.baseUrl.equals(environment.baseUrl));
+		for (int i = 0; i < environments.size(); i++) {
+			if (ownerKey(environments.get(i).baseUrl).equals(ownerKey(environment.baseUrl))) { environments.set(i, environment); return; }
+		}
 		environments.add(environment);
+	}
+
+	static String ownerKey(String baseUrl) { return baseUrl.replaceAll("/+$", ""); }
+
+	String labelFor(String owner) {
+		for (T3Config.Environment env : environments) if (T3Config.ownerKey(env.baseUrl).equals(owner)) {
+			boolean duplicate = environments.stream().filter(e -> java.util.Objects.equals(e.label, env.label)).count() > 1;
+			if (!duplicate) return env.label;
+			java.net.URI address = java.net.URI.create(owner);
+			boolean sameHost = environments.stream().filter(e -> java.util.Objects.equals(e.label, env.label))
+				.allMatch(e -> java.util.Objects.equals(java.net.URI.create(e.baseUrl).getHost(), address.getHost()));
+			return env.label + " · " + (sameHost && address.getPort() != -1 ? ":" + address.getPort() : address.getAuthority());
+		}
+		return "Unpaired machine";
 	}
 
 	public static T3Config load(Path path) {
@@ -64,6 +84,13 @@ public final class T3Config {
 					if (config.environments.isEmpty() && config.baseUrl != null && config.accessToken != null) {
 						config.environments.add(new Environment("This Mac", config.baseUrl, config.accessToken));
 					}
+					if (config.villages == null) config.villages = new java.util.HashMap<>();
+					if (config.officeWorlds == null) config.officeWorlds = new java.util.HashSet<>();
+					if (config.officePreferences == null) config.officePreferences = new java.util.HashMap<>();
+					config.officePreferences.values().removeIf(java.util.Objects::isNull);
+					config.officePreferences.values().forEach(OfficeRoster.Preferences::normalize);
+					if (config.sharedOfficePreferences == null) config.sharedOfficePreferences = new OfficeRoster.Preferences();
+					config.sharedOfficePreferences.normalize();
 					config.baseUrl = null;
 					config.accessToken = null;
 					return config;

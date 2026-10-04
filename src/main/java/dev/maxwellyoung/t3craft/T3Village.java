@@ -46,7 +46,7 @@ final class T3Village {
 		BlockPos anchor = mod.villageAnchor();
 		if (minecraft.level != level || anchor == null) clear();
 		level = minecraft.level;
-		if (level == null || anchor == null || minecraft.player == null) return;
+		if (level == null || minecraft.player == null) return;
 		ticks++;
 
 		if (minecraft.gui.screen() == null && minecraft.hitResult instanceof EntityHitResult hit) {
@@ -63,6 +63,8 @@ final class T3Village {
 			}
 		}
 
+		// Shared villagers can be opened by a paired client without placing a local village.
+		if (anchor == null) return;
 
 		if (mod.officeMode() && minecraft.gui.screen() == null
 			&& minecraft.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit) {
@@ -118,7 +120,7 @@ final class T3Village {
 						: net.minecraft.world.item.ItemStack.EMPTY);
 			}
 			// Faint typing from seated workers when you're close.
-			if (agent.settled() && agent.zone == OfficeBrain.Zone.WORK && Math.random() < 0.05
+			if (mod.state().online(agent.threadId) && agent.settled() && agent.zone == OfficeBrain.Zone.WORK && Math.random() < 0.05
 				&& minecraft.player.distanceToSqr(villager) < 12 * 12) {
 				level.playLocalSound(villager.getX(), villager.getY() + 0.8, villager.getZ(),
 					net.minecraft.sounds.SoundEvents.WOODEN_BUTTON_CLICK_ON, net.minecraft.sounds.SoundSource.NEUTRAL,
@@ -136,13 +138,16 @@ final class T3Village {
 	/** Office mode: sync the brain with the thread list, then villagers, whiteboards and lamps. */
 	private void syncOffice(T3State.Snapshot snapshot, BlockPos o) {
 		List<String> floors = mod.floors();
-		for (OfficeBrain.Agent gone : brain.sync(snapshot.threads(), floors)) {
+		OfficeRoster.Preferences prefs = mod.officePreferences();
+		Map<String, Integer> previousDesks = Map.copyOf(prefs.desks);
+		for (OfficeBrain.Agent gone : brain.sync(snapshot.threads(), mod.floorOwners(), prefs)) {
 			Villager villager = villagers.remove(gone.threadId);
 			if (villager != null) {
 				threadByEntity.remove(villager.getId());
 				level.removeEntity(villager.getId(), Entity.RemovalReason.DISCARDED);
 			}
 		}
+		if (!previousDesks.equals(prefs.desks)) mod.saveOfficePreferences();
 		for (OfficeBrain.Agent agent : brain.agents().values()) {
 			Villager villager = villagers.get(agent.threadId);
 			if (villager == null) {
@@ -159,14 +164,14 @@ final class T3Village {
 			T3State.ThreadRow row = row(snapshot, agent.threadId);
 			if (row != null) {
 				villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(), VillageLayout.outfit(row)).withLevel(5));
-				villager.setCustomName(VillageLayout.label(row, mod.state().waitingDetail(row.id())));
+				villager.setCustomName(VillageLayout.label(row, mod.state().waitingDetail(row.id()), mod.state().online(row.id())));
 			}
 		}
 		// Each floor's whiteboard: who needs you and what for (only when it changes).
 		for (int floor = 0; floor < Math.max(1, floors.size()); floor++) {
-			String machine = floor < floors.size() ? floors.get(floor) : null;
+			String machine = floor < mod.floorOwners().size() ? mod.floorOwners().get(floor) : null;
 			List<T3Office.Note> notes = snapshot.threads().stream().filter(row -> row.status() == T3State.Status.NEEDS_YOU)
-				.filter(row -> row.environment() == null || row.environment().equals(machine))
+				.filter(row -> row.ownerKey().equals(machine))
 				.map(row -> new T3Office.Note(row.title(), mod.state().waitingDetail(row.id()))).toList();
 			String key = notes.toString();
 			if (!key.equals(boards.get(floor))) {
@@ -234,7 +239,7 @@ final class T3Village {
 			}
 			villager.snapTo(column.getX() + 0.5, y, column.getZ() + 0.5, villager.getYRot(), 0);
 			villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(), VillageLayout.outfit(row)).withLevel(5));
-			villager.setCustomName(VillageLayout.label(row, mod.state().waitingDetail(row.id())));
+			villager.setCustomName(VillageLayout.label(row, mod.state().waitingDetail(row.id()), mod.state().online(row.id())));
 		}
 		villagers.entrySet().removeIf(entry -> {
 			if (keep.contains(entry.getKey())) return false;
@@ -255,7 +260,7 @@ final class T3Village {
 	}
 
 	private void effects(Villager villager, T3State.ThreadRow row) {
-		if (row == null) return;
+		if (row == null || !mod.state().online(row.id())) return;
 		ParticleOptions particle = switch (row.status()) {
 			case WORKING -> ParticleTypes.ENCHANT;
 			case NEEDS_YOU -> ParticleTypes.NOTE;

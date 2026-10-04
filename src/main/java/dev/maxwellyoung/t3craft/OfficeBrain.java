@@ -15,7 +15,7 @@ import java.util.function.Function;
  * villagers. Positions are relative to the office origin; each machine has its own floor.
  */
 final class OfficeBrain {
-	static final int PER_FLOOR = 8;
+	static final int PER_FLOOR = OfficeRoster.DESKS;
 	private static final double WALK_SPEED = 0.09;
 	private static final int FRIDGE_PAUSE = 50;
 
@@ -27,6 +27,7 @@ final class OfficeBrain {
 		String title;
 		T3State.Status status;
 		int floor;
+		int desk;
 		double x, z, sink;
 		float yaw;
 		boolean walking;
@@ -57,18 +58,12 @@ final class OfficeBrain {
 		return agents;
 	}
 
-	/**
-	 * Places the most recent threads of each machine on that machine's floor. Returns agents that
-	 * left (their threads dropped off the list) so the caller can remove their villagers.
-	 */
-	List<Agent> sync(List<T3State.ThreadRow> rows, List<String> floors) {
+	/** Spatial slots survive activity reorder; each owner gets its own floor. */
+	List<Agent> sync(List<T3State.ThreadRow> rows, List<String> owners, OfficeRoster.Preferences prefs) {
 		Set<String> keep = new HashSet<>();
-		int[][] counters = new int[Math.max(1, floors.size())][3];
-		int[] perFloor = new int[Math.max(1, floors.size())];
-		for (T3State.ThreadRow row : rows) {
-			int floor = row.environment() == null ? 0 : Math.max(0, floors.indexOf(row.environment()));
-			if (floor >= perFloor.length || perFloor[floor] >= PER_FLOOR) continue;
-			perFloor[floor]++;
+		for (OfficeRoster.Resident resident : OfficeRoster.sync(rows, owners, prefs)) {
+			T3State.ThreadRow row = resident.row();
+			int floor = owners.indexOf(row.ownerKey());
 			keep.add(row.id());
 			Zone zone = switch (row.status()) {
 				case WORKING -> Zone.WORK;
@@ -80,7 +75,7 @@ final class OfficeBrain {
 				case NEEDS_YOU -> T3Office.NEEDS_YOU;
 				case LOUNGE -> T3Office.LOUNGE;
 			};
-			T3Office.Spot spot = spots[counters[floor][zone.ordinal()]++ % spots.length];
+			T3Office.Spot spot = spots[resident.desk()];
 			Agent agent = agents.get(row.id());
 			if (agent == null) {
 				agent = new Agent(row.id());
@@ -92,6 +87,7 @@ final class OfficeBrain {
 			}
 			agent.title = row.title();
 			agent.status = row.status();
+			agent.desk = resident.desk();
 			agent.floor = floor;
 			if (!spot.equals(agent.goal)) {
 				Zone previous = agent.zone;

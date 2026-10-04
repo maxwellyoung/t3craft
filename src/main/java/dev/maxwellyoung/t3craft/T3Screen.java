@@ -38,12 +38,15 @@ final class T3Screen extends Screen {
 	private Button deny;
 	private Button stop;
 	private Button review;
+	private Button pin;
 	private String selectedRequest;
 	private T3State.Focus shownFocus;
 	private boolean newThread;
 	private int scroll;
 	/** Machine shown in the sidebar; null means all of them. */
 	private String envFilter;
+	private String projectFilter;
+	private record Project(String key, String label) {}
 	private int sidebarScroll;
 	/** Model chosen in the picker for the next send; null keeps the thread's current model. */
 	private JsonObject pickedModel;
@@ -97,6 +100,10 @@ final class T3Screen extends Screen {
 			.bounds(width - MARGIN - 102, MARGIN + 3, 54, 18).build());
 		addRenderableWidget(Button.builder(Component.literal("Decisions (J)"), b -> mod.openDecisions())
 			.bounds(MARGIN + 5, height - MARGIN - 25, SIDEBAR - 10, 18).build());
+		pin = addRenderableWidget(Button.builder(Component.literal("Pin desk"), b -> mod.togglePin(mod.state().snapshot().focusedRow()))
+			.bounds(MARGIN + 5, height - MARGIN - 47, 78, 18).build());
+		addRenderableWidget(Button.builder(Component.literal("Pins"), b -> minecraft.gui.setScreen(new T3PinsScreen(mod)))
+			.bounds(MARGIN + 87, height - MARGIN - 47, SIDEBAR - 92, 18).build());
 		syncWidgets(mod.state().snapshot());
 		revealFocused();
 	}
@@ -146,33 +153,51 @@ final class T3Screen extends Screen {
 		approve.visible = deny.visible = hasApproval;
 		T3State.ThreadRow row = snapshot.focusedRow();
 		stop.visible = row != null && row.status() == T3State.Status.WORKING;
+		pin.active = row != null && mod.canPin() && !newThread;
+		pin.setMessage(Component.literal(mod.pinned(row) ? "Unpin desk" : "Pin desk"));
 	}
 
-	/** Machines with threads, in sidebar order; empty when only one environment is paired. */
+	/** Filter identities use owner URLs; duplicate names remain independent. */
 	private List<String> machines() {
-		List<String> names = new ArrayList<>();
+		return mod.state().snapshot().threads().stream().map(T3State.ThreadRow::ownerKey).distinct().sorted().toList();
+	}
+
+	private List<Project> projects() {
+		java.util.Map<String, Project> projects = new java.util.LinkedHashMap<>();
+		boolean showMachine = envFilter == null && machines().size() > 1;
 		for (T3State.ThreadRow row : mod.state().snapshot().threads()) {
-			if (row.environment() != null && !names.contains(row.environment())) names.add(row.environment());
+			if (envFilter != null && !envFilter.equals(row.ownerKey())) continue;
+			String key = OfficeRoster.projectKey(row);
+			String label = row.projectTitle() + (showMachine ? " · " + mod.machineLabel(row.ownerKey()) : "");
+			projects.putIfAbsent(key, new Project(key, label));
 		}
-		// Stable order for the filter, whatever was active most recently.
-		names.sort(String.CASE_INSENSITIVE_ORDER);
-		return names;
+		return projects.values().stream().sorted(java.util.Comparator.comparing(Project::label)).toList();
 	}
 
 	private List<T3State.ThreadRow> sidebarRows() {
-		List<T3State.ThreadRow> rows = new ArrayList<>();
-		for (T3State.ThreadRow row : mod.state().snapshot().threads()) {
-			if (envFilter == null || envFilter.equals(row.environment())) rows.add(row);
-		}
-		return rows;
+		return mod.state().snapshot().threads().stream()
+			.filter(r -> envFilter == null || envFilter.equals(r.ownerKey()))
+			.filter(r -> projectFilter == null || projectFilter.equals(OfficeRoster.projectKey(r))).toList();
 	}
 
-	private int listTop() {
-		return MARGIN + HEADER + (machines().size() > 1 ? FILTER : 0);
+	private int projectTop() { return MARGIN + HEADER + (machines().size() > 1 ? FILTER : 0); }
+	private int listTop() { return projectTop() + (projects().size() > 1 ? FILTER : 0); }
+	private void cycleMachine() {
+		List<String> machines = machines();
+		int at = envFilter == null ? -1 : machines.indexOf(envFilter);
+		envFilter = at + 1 < machines.size() ? machines.get(at + 1) : null;
+		projectFilter = null; sidebarScroll = 0; revealFocused();
+	}
+	private void cycleProject() {
+		List<Project> projects = projects();
+		int at = -1;
+		for (int i = 0; i < projects.size(); i++) if (projects.get(i).key().equals(projectFilter)) at = i;
+		projectFilter = at + 1 < projects.size() ? projects.get(at + 1).key() : null;
+		sidebarScroll = 0; revealFocused();
 	}
 
 	private int visibleRows() {
-		return Math.max(1, (height - MARGIN - 28 - listTop()) / ROW);
+		return Math.max(1, (height - MARGIN - 50 - listTop()) / ROW);
 	}
 
 	private void clampSidebarScroll(int total) {
@@ -279,13 +304,7 @@ final class T3Screen extends Screen {
 	}
 
 	/** Used by the dev self-test: same as clicking the machine filter row. */
-	String cycleMachineForTest() {
-		List<String> machines = machines();
-		int at = envFilter == null ? -1 : machines.indexOf(envFilter);
-		envFilter = at + 1 < machines.size() ? machines.get(at + 1) : null;
-		sidebarScroll = 0;
-		return envFilter;
-	}
+	String cycleMachineForTest() { cycleMachine(); return envFilter == null ? null : mod.machineLabel(envFilter); }
 
 	/** Used by the dev self-test: whether the focused thread's row is within the visible window. */
 	boolean focusedRowVisibleForTest() {
@@ -421,12 +440,12 @@ final class T3Screen extends Screen {
 		int listTop = listTop();
 		List<String> machines = machines();
 		if (machines.size() > 1 && event.x() >= MARGIN && event.x() < MARGIN + SIDEBAR
-			&& event.y() >= MARGIN + HEADER && event.y() < listTop) {
-			// Cycle All → each machine → All.
-			int at = envFilter == null ? -1 : machines.indexOf(envFilter);
-			envFilter = at + 1 < machines.size() ? machines.get(at + 1) : null;
-			sidebarScroll = 0;
-			return true;
+			&& event.y() >= MARGIN + HEADER && event.y() < projectTop()) {
+			cycleMachine(); return true;
+		}
+		if (projects().size() > 1 && event.x() >= MARGIN && event.x() < MARGIN + SIDEBAR
+			&& event.y() >= projectTop() && event.y() < listTop) {
+			cycleProject(); return true;
 		}
 		if (event.x() >= MARGIN && event.x() < MARGIN + SIDEBAR && event.y() >= listTop
 			&& event.y() < listTop + visibleRows() * ROW) {
@@ -500,13 +519,21 @@ final class T3Screen extends Screen {
 
 		List<String> machines = machines();
 		if (envFilter != null && !machines.contains(envFilter)) envFilter = null;
+		if (projectFilter != null && projects().stream().noneMatch(p -> p.key().equals(projectFilter))) projectFilter = null;
 		List<T3State.ThreadRow> rows = sidebarRows();
 		int top = listTop();
 		if (machines.size() > 1) {
-			boolean hovered = mouseX >= x0 && mouseX < x1 && mouseY >= MARGIN + HEADER && mouseY < top;
-			if (hovered) graphics.fill(x0 + 2, MARGIN + HEADER - 2, x1 - 2, top - 1, 0x20FFFFFF);
-			String label = (envFilter == null ? "All machines" : envFilter) + " · " + rows.size() + " ▾";
+			boolean hovered = mouseX >= x0 && mouseX < x1 && mouseY >= MARGIN + HEADER && mouseY < projectTop();
+			if (hovered) graphics.fill(x0 + 2, MARGIN + HEADER - 2, x1 - 2, projectTop() - 1, 0x20FFFFFF);
+			String label = (envFilter == null ? "All machines" : mod.machineLabel(envFilter)) + " · " + rows.size() + " ▾";
 			graphics.text(font, T3Hud.ellipsize(font, label, SIDEBAR - 16), x0 + 8, MARGIN + HEADER + 1, 0xFF9CA3AF, false);
+		}
+
+		if (projects().size() > 1) {
+			boolean hovered = mouseX >= x0 && mouseX < x1 && mouseY >= projectTop() && mouseY < top;
+			if (hovered) graphics.fill(x0 + 2, projectTop(), x1 - 2, top - 1, 0x20FFFFFF);
+			String label = projectFilter == null ? "All projects" : projects().stream().filter(p -> p.key().equals(projectFilter)).findFirst().map(Project::label).orElse("All projects");
+			graphics.text(font, T3Hud.ellipsize(font, label + " ▾", SIDEBAR - 16), x0 + 8, projectTop() + 1, 0xFF9CA3AF, false);
 		}
 
 		clampSidebarScroll(rows.size());
@@ -520,10 +547,10 @@ final class T3Screen extends Screen {
 			else if (hovered) graphics.fill(x0 + 2, y, x1 - 2, y + ROW, 0x20FFFFFF);
 			boolean online = mod.state().online(row.id());
 			graphics.fill(x0 + 8, y + 5, x0 + 12, y + 9, online ? T3Hud.color(row.status()) : 0xFF6B7280);
-			graphics.text(font, T3Hud.ellipsize(font, row.title(), SIDEBAR - 24), x0 + 16, y + 3, 0xFFE5E7EB, false);
+			graphics.text(font, T3Hud.ellipsize(font, (mod.pinned(row) ? "* " : "") + row.title(), SIDEBAR - 24), x0 + 16, y + 3, 0xFFE5E7EB, false);
 			// The machine is in the filter row when filtering, so it's only repeated per row for "All".
-			String machine = row.environment() == null || envFilter != null ? "" : row.environment() + " · ";
-			String meta = (online ? "" : "Offline · ") + machine + row.projectTitle() + " · " + T3Hud.label(row.status());
+			String machine = row.environment() == null || envFilter != null ? "" : mod.machineLabel(row.ownerKey()) + " · ";
+			String meta = (online ? "" : "Offline · ") + T3Hud.label(row.status()) + " · " + row.projectTitle() + (machine.isEmpty() ? "" : " · " + mod.machineLabel(row.ownerKey()));
 			graphics.text(font, T3Hud.ellipsize(font, meta, SIDEBAR - 24), x0 + 16, y + 12, 0xFF6B7280, false);
 			y += ROW;
 		}
@@ -561,7 +588,7 @@ final class T3Screen extends Screen {
 		graphics.text(font, T3Hud.ellipsize(font, title, chipX() - x0 - 20), x0 + 10, MARGIN + 6, 0xFFFFFFFF, false);
 		String status = mod.state().online(row.id()) ? T3Hud.label(row.status()) : "Offline · last-known status";
 		if (row.status() == T3State.Status.WORKING) status += " " + T3Hud.elapsed(row.workingSince()) + (row.step() == null ? "" : " · " + row.step());
-		String meta = (row.environment() == null ? "" : row.environment() + " · ") + row.projectTitle() + " · ";
+		String meta = (row.environment() == null ? "" : mod.machineLabel(row.ownerKey()) + " · ") + row.projectTitle() + " · ";
 		graphics.text(font, T3Hud.ellipsize(font, status + " · " + meta, chipX() - x0 - 20), x0 + 10, MARGIN + 16,
 			mod.state().online(row.id()) ? T3Hud.color(row.status()) : 0xFF9CA3AF, false);
 		graphics.horizontalLine(x0, x1 - 1, MARGIN + HEADER, 0x30FFFFFF);

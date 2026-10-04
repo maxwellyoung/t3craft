@@ -13,6 +13,7 @@ It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3
 ## What it does
 
 - **Panel.** Press **`** to open it. Your threads are on the left and the conversation on the right, with Markdown rendered: headings, lists, code, tables. **Enter** sends the prompt and puts you back in the game; **Shift+Enter** sends and keeps the panel open. **+ New** starts a thread. Unsent text is kept per thread.
+- **Pinned desks and projects.** Choose **Pin desk** in a thread panel to keep it in this world’s office. **Pins** lists saved pins, including unavailable or archived threads, and lets you remove them. The project filter narrows the sidebar without changing the focused conversation or unsent draft.
 - **Several machines.** Pair more than one T3 environment (a laptop and a home server, for example) and every active thread from each shares one scrolling sidebar, tagged with its machine. Click the filter row under the header to show one machine at a time. Actions go to the machine that owns the thread.
 - **Pings.** While an agent works or waits on you, the top-left corner shows `Thread · Working 1m 12s · step`. When it finishes, fails, or needs you, you get one toast and a note-block sound. Press **`** within a minute to open the thread that pinged.
 - **Approvals and questions.** Approve with **Y** / **N**. When an agent asks something, press **1–9** or click an option, or type your own answer.
@@ -23,11 +24,15 @@ It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3
 
 ![Approving a command from inside the game](docs/approval.jpg)
 
-Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 decisions` · `/t3 review` · `/t3 threads` · `/t3 use <n>` · `/t3 ask <prompt>` · `/t3 new <prompt>` · `/t3 approve` · `/t3 deny` · `/t3 stop` · `/t3 village [off]` · `/t3 books on|off` · `/t3 agent-build on|off`
+Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 decisions` · `/t3 review` · `/t3 threads` · `/t3 use <n>` · `/t3 ask <prompt>` · `/t3 new <prompt>` · `/t3 approve` · `/t3 deny` · `/t3 stop` · `/t3 pin` (toggle focused thread) · `/t3 pins` · `/t3 village [off]` · `/t3 books on|off` · `/t3 agent-build on|off`
 
 ## Office
 
 `/t3 office` builds an agent office with one floor per paired machine. Residents work at their desks, wait at the whiteboard for decisions, and return to the lounge when finished. The whiteboard and review lectern open the decision and checkpoint screens. Each world remembers its office location; rebuilding changes blocks and requires command permission. `/t3 office off` disables the office view. A dedicated server can pair with `/t3village pair <link>` and build its shared office with `/t3office build`.
+
+In 0.3.0, each machine has eight stable desk slots. Pins take priority, then waiting threads, working threads and recent conversations. Included residents keep their slot when activity reorders the sidebar; pinned identity survives reconnect and client restart. Offline residents are labelled Offline and stop emitting work effects or typing sounds. A resident still walks to the whiteboard or lounge when its status changes, returning to its own chair when working again. Pins are saved per world and dimension, keyed by the owning environment and thread. Re-pairing or renaming a machine keeps its floor order. An archived/unavailable pin is shown in **Pins**; it has no resident and can be removed. An unavailable pin’s old slot can be used temporarily and is reclaimed if the pin returns.
+
+Shared offices have separate operator-owned preferences: `/t3office pin <thread-id>` and `/t3office unpin <thread-id>`. Client pins do not change the shared office. A paired client can open a shared resident’s thread without placing its own village. Pins and project filters change only Minecraft presentation, never agent permissions. Plain `/t3 village` remains a recent-thread arrangement.
 
 ## Decision desk and checkpoint review (0.2.0)
 
@@ -63,7 +68,7 @@ Set up T3 Craft (https://github.com/maxwellyoung/t3craft) on this machine so I c
 
 Or by hand:
 
-1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.2.1.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
+1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.3.0.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
 3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
 
@@ -125,7 +130,7 @@ For a second world with its own app, give it its own profile and server folder (
 Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).
 
 ```sh
-./gradlew build                     # → build/libs/t3craft-0.2.1.jar
+./gradlew build                     # → build/libs/t3craft-0.3.0.jar
 ./gradlew runServer --args=nogui    # local offline test server in run-server/ (set white-list=false)
 ./gradlew runClient                 # dev client
 ```
@@ -162,11 +167,15 @@ python3 scripts/feature-fixture.py --config "$PWD/run/feature-fixture.json"
 
 Then run `./gradlew featureCheck`. It exercises two-machine routing, older waiting threads, stale requests, disconnect/reconnect, checkpoint reply identity, and deleted/binary/renamed/empty patches. It never uses a real pairing or dispatches to an agent. Run the fixture with `--protocol2 --port 25682`, then `./gradlew featureCheck -PfixturePort=25682`, to exercise current T3 wire shapes. CI checks both protocols.
 
+`./gradlew officeCheck` verifies stable assignments, pin/waiting/working priority, actual configuration save/load, owner/project identity, removal and independent client/shared preferences with synthetic data. It does not contact an agent.
+
 `./gradlew reliabilityCheck` (or `-PfixturePort=25682`) checks MCP Host/Origin policy and auth/protocol recovery with the same isolated fixtures. `python3 scripts/check-launcher.py` checks that client success and failure both save/stop only the launcher-owned console server, preserving unrelated and reused servers. It never launches Minecraft or reads a user world.
 
 While the isolated Minecraft client is running, `python3 scripts/check-mcp.py` verifies the actual HTTP endpoint with read-only `tools/list` requests, rejected browser origins/Host headers and malformed/oversized bodies. It never runs a game tool.
 
 With protocol 2 fixtures reset and a disposable server running, `./gradlew runClient -Pselftest=connection-errors -Pjoin=localhost:25690 -Pconfig=<fixture-config>` verifies visible per-machine recovery guidance, reconnection and preserved drafts in the actual game. It requires the isolated fixtures on 25682/25683.
+
+The `stable-office` self-test uses protocol 2 fixtures on 25682/25683 and a disposable world to pin through the actual button, build the office, add six newer threads, and check the same desk/entity plus project filtering and draft preservation. It logs the saved desk index. Restart with `stable-office-restore` and `-PexpectedDesk=<index>` to check persistence, archived resident removal and safe unpinning. The `stable-shared` test requires that disposable server also paired to the fixture; it exercises operator pin/unpin, spatial continuity and physically opening a shared resident without a local village. Reset fixtures between independent scenarios.
 
 For the game walkthrough, use a disposable creative dev server with `Player` opped. Reset both fixtures after the Java checks, then join that server:
 

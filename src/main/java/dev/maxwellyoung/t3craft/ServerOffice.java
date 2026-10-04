@@ -42,7 +42,20 @@ final class ServerOffice {
 	}
 
 	List<String> floors() {
-		return config.environments.stream().map(e -> e.label).toList();
+		return config.environments.stream().map(e -> config.labelFor(T3Config.ownerKey(e.baseUrl))).toList();
+	}
+
+	List<String> owners() { return config.environments.stream().map(e -> T3Config.ownerKey(e.baseUrl)).toList(); }
+
+	boolean pin(String threadId, boolean remove) {
+		if (remove) {
+			boolean removed = config.sharedOfficePreferences.pins.removeIf(p -> p.threadId().equals(threadId));
+			if (removed) save.run();
+			return removed;
+		}
+		T3State.ThreadRow row = state.snapshot().threads().stream().filter(r -> r.id().equals(threadId)).findFirst().orElse(null);
+		if (row == null || !config.sharedOfficePreferences.pin(row)) return false;
+		save.run(); return true;
 	}
 
 	BlockPos origin() {
@@ -100,7 +113,7 @@ final class ServerOffice {
 			if (agent.holding != holds) {
 				villager.setItemSlot(EquipmentSlot.MAINHAND, agent.holding ? new ItemStack(Items.HONEY_BOTTLE) : ItemStack.EMPTY);
 			}
-			if (agent.settled() && agent.zone == OfficeBrain.Zone.WORK && Math.random() < 0.05) {
+			if (state.online(agent.threadId) && agent.settled() && agent.zone == OfficeBrain.Zone.WORK && Math.random() < 0.05) {
 				level.playSound(null, villager.blockPosition(), SoundEvents.WOODEN_BUTTON_CLICK_ON, SoundSource.NEUTRAL,
 					0.12F, 1.7F + (float) Math.random() * 0.4F);
 			}
@@ -109,10 +122,12 @@ final class ServerOffice {
 
 	private void sync(MinecraftServer server, ServerLevel level, BlockPos o) {
 		List<String> floors = floors();
-		for (OfficeBrain.Agent gone : brain.sync(state.snapshot().threads(), floors)) {
+		Map<String, Integer> previousDesks = Map.copyOf(config.sharedOfficePreferences.desks);
+		for (OfficeBrain.Agent gone : brain.sync(state.snapshot().threads(), owners(), config.sharedOfficePreferences)) {
 			Villager villager = villagers.remove(gone.threadId);
 			if (villager != null) villager.discard();
 		}
+		if (!previousDesks.equals(config.sharedOfficePreferences.desks)) save.run();
 		for (OfficeBrain.Agent agent : brain.agents().values()) {
 			Villager villager = villagers.get(agent.threadId);
 			if (villager == null || villager.isRemoved()) {
@@ -138,13 +153,13 @@ final class ServerOffice {
 			T3State.ThreadRow row = state.snapshot().threads().stream().filter(r -> r.id().equals(agent.threadId)).findFirst().orElse(null);
 			if (row != null) {
 				villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(), VillageLayout.outfit(row)).withLevel(5));
-				villager.setCustomName(VillageLayout.label(row, state.waitingDetail(row.id())));
+				villager.setCustomName(VillageLayout.label(row, state.waitingDetail(row.id()), state.online(row.id())));
 			}
 		}
 		for (int floor = 0; floor < Math.max(1, floors.size()); floor++) {
-			String machine = floor < floors().size() ? floors().get(floor) : null;
+			String machine = floor < owners().size() ? owners().get(floor) : null;
 			List<T3Office.Note> notes = state.snapshot().threads().stream().filter(row -> row.status() == T3State.Status.NEEDS_YOU)
-				.filter(row -> row.environment() == null || row.environment().equals(machine))
+				.filter(row -> row.ownerKey().equals(machine))
 				.map(row -> new T3Office.Note(row.title(), state.waitingDetail(row.id()))).toList();
 			String key = notes.toString();
 			if (!key.equals(boards.get(floor))) {

@@ -69,7 +69,8 @@ final class T3Office {
 		new Spot(5, 8, 0.3, -90), new Spot(8, 9, 0.3, 90), new Spot(5, 10, 0.3, -90), new Spot(8, 11, 0.3, 90),
 		new Spot(5, 12, 0.3, -90), new Spot(8, 13, 0.3, 90), new Spot(5, 14, 0.3, -90), new Spot(8, 15, 0.3, 90)};
 	/** At the rolling whiteboard in the window corner. */
-	static final Spot[] NEEDS_YOU = {new Spot(2, 27, 0, 90), new Spot(2, 28, 0, 90), new Spot(2, 26, 0, 90), new Spot(3, 27, 0, 90)};
+	static final Spot[] NEEDS_YOU = {new Spot(2, 27, 0, 90), new Spot(2, 28, 0, 90), new Spot(2, 26, 0, 90), new Spot(3, 27, 0, 90),
+		new Spot(3, 28, 0, 90), new Spot(3, 26, 0, 90), new Spot(4, 27, 0, 90), new Spot(4, 28, 0, 90)};
 	/** Sunk into the sofa facing the window, then the side-table corner and the kitchen. */
 	static final Spot[] LOUNGE = {
 		new Spot(6, 25, 0.45, 0), new Spot(7, 25, 0.45, 0), new Spot(5, 25, 0.45, 0), new Spot(8, 25, 0.45, 0),

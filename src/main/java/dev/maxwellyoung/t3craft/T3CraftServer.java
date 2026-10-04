@@ -55,6 +55,18 @@ public final class T3CraftServer implements DedicatedServerModInitializer {
 						+ " floor(s)); the agents are walking in."), true);
 					return 1;
 				}))
+				.then(Commands.literal("pin").then(Commands.argument("thread", StringArgumentType.word()).executes(ctx -> {
+					boolean ok = office.pin(StringArgumentType.getString(ctx, "thread"), false);
+					if (ok) ctx.getSource().sendSuccess(() -> Component.literal("Thread pinned to the shared office."), false);
+					else ctx.getSource().sendFailure(Component.literal("Thread unavailable or all eight desks on its machine are pinned."));
+					return ok ? 1 : 0;
+				})))
+				.then(Commands.literal("unpin").then(Commands.argument("thread", StringArgumentType.word()).executes(ctx -> {
+					boolean ok = office.pin(StringArgumentType.getString(ctx, "thread"), true);
+					if (ok) ctx.getSource().sendSuccess(() -> Component.literal("Thread unpinned from the shared office."), false);
+					else ctx.getSource().sendFailure(Component.literal("That thread is not pinned."));
+					return ok ? 1 : 0;
+				})))
 				.then(Commands.literal("off").executes(ctx -> {
 					office.off(ctx.getSource().getServer());
 					ctx.getSource().sendSuccess(() -> Component.literal("Office agents sent home."), true);
