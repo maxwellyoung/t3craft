@@ -72,11 +72,19 @@ public final class T3CraftServer implements DedicatedServerModInitializer {
 						try {
 							T3Api.Pairing pairing = T3Api.pair(link, "Minecraft server");
 							String label = T3Api.environmentLabel(pairing.baseUrl());
+							T3Api.ServerInfo info = null;
+							try {
+								info = T3Api.serverInfo(pairing.baseUrl());
+							} catch (Exception ignored) {
+								// The connection itself reports problems.
+							}
+							T3Api.ServerInfo version = info;
 							source.getServer().execute(() -> {
 								config.upsert(new T3Config.Environment(label, pairing.baseUrl(), pairing.accessToken()));
 								config.save(configPath);
 								connect();
 								source.sendSuccess(() -> Component.literal("Paired the server with " + label + ". Place the village with /t3village here."), true);
+								if (version != null && !version.supported()) source.sendFailure(Component.literal(version.mismatchMessage()));
 							});
 						} catch (Exception e) {
 							source.getServer().execute(() -> source.sendFailure(Component.literal("Pairing failed: " + e.getMessage())));

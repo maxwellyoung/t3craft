@@ -3,7 +3,7 @@
 	"id": "t3craft",
 	"version": "${version}",
 	"name": "T3 Craft",
-	"description": "Talk to your T3 Code threads from inside Minecraft, then keep playing while the agent works.",
+	"description": "Talk to your T3 Code threads from inside Minecraft, then keep playing while the agent works. Works with T3 Code 0.0.43 to 0.0.46 nightly. Unofficial: not affiliated with Mojang, Microsoft, or T3 Tools Inc.",
 	"authors": ["Maxwell Young"],
 	"license": "MIT",
 	"contact": {
@@ -21,6 +21,6 @@
 		"fabricloader": ">=0.19.5",
 		"minecraft": "~26.3",
 		"java": ">=25",
-		"fabric-api": "*"
+		"fabric-api": ">=0.161.0"
 	}
 }

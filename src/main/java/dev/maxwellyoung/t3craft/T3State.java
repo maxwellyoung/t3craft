@@ -305,12 +305,17 @@ public final class T3State {
 		try {
 			T3Socket opened = env.api.openSocket(reason -> executor.execute(() -> onSocketClosed(env, reason)));
 			env.socket = opened;
+			env.api.attachSocket(opened);
 			JsonObject payload = new JsonObject();
 			payload.addProperty("requestCompletionMarker", true);
 			opened.stream("orchestration.subscribeShell", payload,
 				value -> executor.execute(() -> { if (env.socket == opened) onShellItem(env, value); }));
 			env.socketFailures = 0;
 			loadProvidersIfStale(env);
+		} catch (T3Api.UnsupportedVersionException e) {
+			// Polling would hit the same wall; say why instead of retrying quietly.
+			env.error = e.getMessage();
+			env.nextSocketAttempt = System.currentTimeMillis() + 60_000;
 		} catch (Exception e) {
 			env.socketFailures++;
 			// Back off to at most a minute; HTTP polling covers the gap.
@@ -326,6 +331,8 @@ public final class T3State {
 		env.threadRequest = null;
 		env.threadRequestFor = null;
 		env.nextSocketAttempt = System.currentTimeMillis() + 2_000;
+		env.api.attachSocket(null);
+		env.api.forgetProtocol();
 	}
 
 	private void closeSocket(Env env) {
@@ -339,7 +346,17 @@ public final class T3State {
 	private void onShellItem(Env env, JsonObject item) {
 		switch (string(item, "kind")) {
 			case "snapshot" -> {
-				applyShellSnapshot(env, item.getAsJsonObject("snapshot"));
+				JsonObject shell = item.getAsJsonObject("snapshot");
+				if (item.has("resolvedRepositoryIdentityRoots")) {
+					// Protocol 2 follows the real snapshot with project-metadata refreshes whose thread lists are
+					// deliberately empty; applying them as a full snapshot would wipe every thread.
+					for (JsonElement project : array(shell, "projects")) {
+						JsonObject p = project.getAsJsonObject();
+						env.projectTitles.put(string(p, "id"), string(p, "title"));
+					}
+				} else {
+					applyShellSnapshot(env, shell);
+				}
 				publish(List.of());
 			}
 			case "synchronized" -> {
@@ -349,23 +366,29 @@ public final class T3State {
 				fetchFocus();
 				publishWithEvents();
 			}
-			case "project-upserted" -> {
+			case "project-upserted", "project.updated" -> {
 				JsonObject project = item.getAsJsonObject("project");
 				env.projectTitles.put(string(project, "id"), string(project, "title"));
 				publish(List.of());
 			}
-			case "project-removed" -> {
+			case "project-removed", "project.removed" -> {
 				env.projectTitles.remove(string(item, "projectId"));
 				publish(List.of());
 			}
-			case "thread-upserted" -> {
-				JsonObject thread = item.getAsJsonObject("thread");
+			case "thread-upserted", "thread.updated" -> {
+				JsonObject thread = T3V2.normalizeShellThread(item.getAsJsonObject("thread"));
+				// Protocol 2 says where the thread lives; archived ones leave the list.
+				if ("archive".equals(string(item, "location"))) {
+					env.threads.remove(string(thread, "id"));
+					publishWithEvents();
+					return;
+				}
 				env.threads.put(string(thread, "id"), thread);
 				// Refetch before announcing, so a "needs you" ping already carries the approval.
 				if (string(thread, "id").equals(focusedThreadId)) fetchFocus();
 				publishWithEvents();
 			}
-			case "thread-removed" -> {
+			case "thread-removed", "thread.removed" -> {
 				env.threads.remove(string(item, "threadId"));
 				publishWithEvents();
 			}
@@ -385,6 +408,8 @@ public final class T3State {
 		if (want == null) return;
 		JsonObject payload = new JsonObject();
 		payload.addProperty("threadId", want);
+		// Protocol 2 opens with a snapshot; a bounded one is plenty since this only triggers refetches.
+		if (env.api.knownProtocol() >= 2) payload.addProperty("acceptBoundedSnapshot", true);
 		T3Socket current = env.socket;
 		env.threadRequest = current.stream("orchestration.subscribeThread", payload,
 			value -> executor.execute(() -> { if (env.socket == current && want.equals(focusedThreadId)) scheduleFocusFetch(); }));
@@ -423,7 +448,7 @@ public final class T3State {
 		}
 		env.threads.clear();
 		for (JsonElement element : shell.getAsJsonArray("threads")) {
-			JsonObject thread = element.getAsJsonObject();
+			JsonObject thread = T3V2.normalizeShellThread(element.getAsJsonObject());
 			env.threads.put(thread.get("id").getAsString(), thread);
 		}
 	}

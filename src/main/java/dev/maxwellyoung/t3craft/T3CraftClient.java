@@ -203,9 +203,18 @@ public final class T3CraftClient implements ClientModInitializer {
 	}
 
 	public void interrupt() {
-		String threadId = state.focusedThreadId();
+		T3State.ThreadRow row = state.snapshot().focusedRow();
 		T3Api api = state.api();
-		if (threadId != null) state.run(() -> api.interrupt(threadId), this::reportError);
+		if (row != null && api != null) state.run(() -> api.interrupt(row.raw()), this::reportError);
+	}
+
+	static T3Api.ServerInfo serverInfoOrNull(String baseUrl) {
+		try {
+			return T3Api.serverInfo(baseUrl);
+		} catch (Exception e) {
+			LOGGER.debug("Could not read T3 version from {}", baseUrl, e);
+			return null;
+		}
 	}
 
 	private void reportError(Exception e) {
@@ -340,7 +349,8 @@ public final class T3CraftClient implements ClientModInitializer {
 		Thread thread = new Thread(() -> {
 			try {
 				T3Api.Pairing pairing = T3Api.pair(link, "Minecraft");
-				String label = T3Api.environmentLabel(pairing.baseUrl());
+				T3Api.ServerInfo info = serverInfoOrNull(pairing.baseUrl());
+				String label = info != null ? info.label() : T3Api.environmentLabel(pairing.baseUrl());
 				Minecraft.getInstance().execute(() -> {
 					// Pairing adds an environment; the others stay connected.
 					config.upsert(new T3Config.Environment(label, pairing.baseUrl(), pairing.accessToken()));
@@ -348,6 +358,7 @@ public final class T3CraftClient implements ClientModInitializer {
 					connectAll();
 					chat(Component.literal("Paired with " + label + " (" + config.environments.size() + " environment"
 						+ (config.environments.size() == 1 ? "" : "s") + "). Press ` to open the panel.").withStyle(ChatFormatting.GREEN));
+					if (info != null && !info.supported()) chat(Component.literal(info.mismatchMessage()).withStyle(ChatFormatting.RED));
 				});
 			} catch (Exception e) {
 				reportError(e);

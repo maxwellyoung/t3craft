@@ -8,7 +8,19 @@
 
 It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3 environments the same way the mobile app does, so it works on any server, and prompts never go through server chat. Installed on a dedicated server as well, it can also run a shared village that everyone on the server sees.
 
-> **Early prototype.** Tested end to end in the Fabric dev client against T3 Code nightly `0.0.43`. It uses T3's client protocol, which is not a documented public API and may change.
+> **Early release.** It uses T3's client protocol, which is not a documented public API and changes between T3 releases. See [Supported versions](#supported-versions).
+
+## Supported versions
+
+| | Supported | Checked against |
+| --- | --- | --- |
+| Minecraft Java | 26.3 | 26.3 |
+| Fabric Loader | 0.19.5 or newer | 0.19.5 |
+| Fabric API | 0.161.0+26.3 or newer | 0.161.0+26.3 |
+| Java | 25 or newer | Temurin 25 |
+| T3 Code | 0.0.43 to 0.0.46 nightly | 0.0.45 (orchestration protocol 1), 0.0.46-nightly.20261003.2638 (protocol 2) |
+
+T3 Code 0.0.46 nightlies replaced T3's orchestration protocol (protocol 2: runs and runtime requests instead of turns and activities, commands over the RPC socket instead of HTTP). T3 Craft asks each environment which protocol it speaks (`/.well-known/t3/environment`) and uses the matching one, so a mix of stable and nightly machines works. If an environment speaks a protocol this build doesn't know, pairing and the panel say so, naming the T3 version, instead of failing quietly.
 
 ## What it does
 
@@ -27,7 +39,7 @@ Commands: `/t3` (open the panel) · `/t3 pair <link>` · `/t3 unpair` · `/t3 th
 
 ## Install and pair
 
-1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Build the mod (below) and copy `build/libs/t3craft-0.1.4.jar` into `mods/`.
+1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Build the mod (below) and copy `build/libs/t3craft-0.2.0.jar` into `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
 3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
 
@@ -78,7 +90,7 @@ Double-clicking **T3 Craft** starts the local test world if it isn't running, op
 Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).
 
 ```sh
-./gradlew build                     # → build/libs/t3craft-0.1.4.jar
+./gradlew build                     # → build/libs/t3craft-0.2.0.jar
 ./gradlew runServer --args=nogui    # local offline test server in run-server/ (set white-list=false)
 ./gradlew runClient                 # dev client
 ```
@@ -86,6 +98,7 @@ Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).
 Checks:
 
 ```sh
+./gradlew test                      # protocol-2 mapping, no network
 ./gradlew smoke -Pt3url='<pairing link>' [-Pt3prompt='…'] [-Pt3new=true]   # protocol round trip, no Minecraft
 ./gradlew runClient -Pselftest='<prompt>'        # joins localhost:25565, drives the panel, approves, saves run/screenshots
 ./gradlew runClient -Pselftest='ask: …'          # answers an agent question with the number keys
@@ -100,7 +113,9 @@ Checks:
 
 ## How it works
 
-- **Pairing:** exchanges the T3 pairing link for a bearer token at `/oauth/token`, then uses the same HTTP routes as T3's own clients (`/api/orchestration/shell`, `/threads/:id`, `/dispatch`).
+- **Pairing:** exchanges the T3 pairing link for a bearer token at `/oauth/token`, then reads `/.well-known/t3/environment` for the T3 version and orchestration protocol.
+- **Protocol 1 (T3 0.0.43 to 0.0.45):** the same HTTP routes as T3's own clients (`/api/orchestration/shell`, `/threads/:id`, `/dispatch`).
+- **Protocol 2 (T3 0.0.46 nightlies):** `/api/orchestration/shell` and `/threads/:id/bounded` with the `x-t3-orchestration-protocol: 2` header; prompts, approvals, answers, and Stop go over the socket as `orchestration.dispatchCommand` (`message.dispatch`, `runtime-request.respond`, `run.interrupt`), and new threads use `orchestration.launchThread`. `T3V2.java` maps protocol-2 threads back to the shape the rest of the mod reads.
 - **Live updates:** a WebSocket (one-time ticket) subscribes to `orchestration.subscribeShell` for thread status. Events from `orchestration.subscribeThread` on the focused thread trigger a refetch of its recent turns, at most four times a second.
 - **Notifications:** only the focused thread and threads you prompted from Minecraft notify you. Each new approval or question pings once.
 - **Model list:** comes from `server.getConfig` over the same socket.
