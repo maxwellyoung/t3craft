@@ -10,7 +10,7 @@ A release jar for ordinary Fabric profiles, with a personal client office or an 
 
 It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3 environments the same way the mobile app does, so it works on any server, and prompts never go through server chat. Installed on a dedicated server as well, it can also run a shared village that everyone on the server sees.
 
-> **Early prototype.** Validated against T3 Code nightly `0.0.46-nightly.20261003.2638`, including a real agent edit, approvals and checkpoint retrieval. It uses T3's client protocol, which is not a documented public API and may change.
+> **Early project.** 0.3.0 checkpoint review was verified against T3 Code nightly `0.0.46-nightly.20261004.2644`. The earlier `0.0.46-nightly.20261003.2638` walkthrough also exercised a real agent edit and approvals. It uses T3's client protocol, which is not a documented public API and may change.
 
 ## What it does
 
