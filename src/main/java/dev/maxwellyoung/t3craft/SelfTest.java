@@ -14,7 +14,7 @@ import net.minecraft.world.entity.npc.villager.Villager;
  * {@code shared:<link>} pairs and places the dev server's shared village. Never active in normal play.
  */
 final class SelfTest {
-	private enum Step { RELEASE_SITE, RELEASE_OPEN, RELEASE_CHECK, RELEASE_FEEDBACK, DESK_SITE, DESK_OPEN, DESK_REQUEST, DESK_ANSWERED, DESK_REVIEW_OPEN, DESK_REVIEW, DESK_DIFF, DESK_FEEDBACK, DESK_SIDEBAR, SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
+	private enum Step { AUTH_ERROR, AUTH_RECOVER, PROTOCOL_ERROR, PROTOCOL_RECOVER, RELEASE_SITE, RELEASE_OPEN, RELEASE_CHECK, RELEASE_FEEDBACK, DESK_SITE, DESK_OPEN, DESK_REQUEST, DESK_ANSWERED, DESK_REVIEW_OPEN, DESK_REVIEW, DESK_DIFF, DESK_FEEDBACK, DESK_SIDEBAR, SILK_WORLD, OFFICE_SITE, OFFICE, FLOW_SEND, FLOW_WAIT, FLOW_CLICK, FLOW_DONE, OFFICE_SHARED_PAIR, OFFICE_SHARED_BUILD, OFFICE_SHARED_CHECK, VFLOW_SEND, VFLOW_WAIT, VFLOW_CLICK, VFLOW_DONE, SHARED_PAIR, SHARED_CHECK, SHARED_COUNT, THREADS, PREP, DONE_PANEL, PAIR_JOIN, PAIR_WAIT, DRAFT_TYPE, DRAFT_REOPEN, DRAFT_CHECK, WAIT_WORLD, OPEN, SEND, ASK_WAIT, ASK_ANSWERED, LOOK, WATCH, VILLAGE, VILLAGE_LOOK, VILLAGE_CLICK, VILLAGE_CHECK, WAIT_WORKING, WAIT_APPROVAL_OR_DONE, WAIT_DONE, CLOSE, HUD, FINISH, DONE }
 
 	private final T3CraftClient mod;
 	private final String prompt;
@@ -45,6 +45,15 @@ final class SelfTest {
 		return prompt == null || prompt.isBlank() ? null : new SelfTest(mod, prompt);
 	}
 
+	private void fixtureControl(Minecraft minecraft, String action) {
+		mod.state().run(() -> {
+			var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:25682/_qa/" + action))
+				.timeout(java.time.Duration.ofSeconds(3)).GET().build();
+			var response = java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.discarding());
+			if (response.statusCode() != 200) throw new java.io.IOException("Fixture control failed");
+		}, e -> minecraft.execute(() -> finish(minecraft, "FAIL fixture recovery control")));
+	}
+
 	void tick(Minecraft minecraft) {
 		ticks++;
 		if (step == Step.DONE) return;
@@ -52,6 +61,33 @@ final class SelfTest {
 		T3State.Snapshot snapshot = mod.state().snapshot();
 		T3State.ThreadRow row = snapshot.focusedRow();
 		switch (step) {
+			case AUTH_ERROR -> {
+				String error = mod.state().connectionError("A-done-0");
+				if (ticks < 30 || error == null || !error.contains("Settings > Connections")) return;
+				if (!(minecraft.gui.screen() instanceof T3Screen screen) || !"Connection QA draft".equals(screen.composerValueForTest()) || mod.state().online("A-done-0") || !mod.state().online("B-done-0")) {
+					finish(minecraft, "FAIL auth recovery scope/draft"); return;
+				}
+				shot(minecraft, "pairing-recovery"); fixtureControl(minecraft, "reset");
+				advance(Step.AUTH_RECOVER, "visible re-pair guidance with cached conversation retained");
+			}
+			case AUTH_RECOVER -> {
+				if (ticks < 30 || !mod.state().online("A-done-0")) return;
+				fixtureControl(minecraft, "protocol3");
+				advance(Step.PROTOCOL_ERROR, "checking future protocol after server restart");
+			}
+			case PROTOCOL_ERROR -> {
+				String error = mod.state().connectionError("A-done-0");
+				if (ticks < 30 || error == null || !error.contains("Update T3 Craft")) return;
+				shot(minecraft, "protocol-recovery"); fixtureControl(minecraft, "reset");
+				advance(Step.PROTOCOL_RECOVER, "visible incompatible-protocol guidance");
+			}
+			case PROTOCOL_RECOVER -> {
+				if (ticks < 30 || !mod.state().online("A-done-0")) return;
+				if (!(minecraft.gui.screen() instanceof T3Screen screen) || !"Connection QA draft".equals(screen.composerValueForTest())) {
+					finish(minecraft, "FAIL recovery lost draft"); return;
+				}
+				finish(minecraft, "PASS connection recovery: per-machine auth and protocol guidance, healthy peer, reconnect and preserved draft");
+			}
 
 			case RELEASE_SITE -> {
 				if (mod.office().building() || ticks < 240) return;
@@ -654,6 +690,16 @@ final class SelfTest {
 				}
 			}
 			case OPEN -> {
+				if ("connection-errors".equals(prompt)) {
+					if (ticks < 160) return; // Let Minecraft's first-join chat warning leave the screenshot.
+					if (snapshot.threads().size() != 26 || !snapshot.threads().stream().anyMatch(t -> t.id().equals("A-done-0") && t.projectTitle().equals("Greeting fixture"))) {
+						finish(minecraft, "FAIL connection-errors requires isolated fixtures"); return;
+					}
+					mod.focus("A-done-0"); mod.openPanel();
+					((T3Screen) minecraft.gui.screen()).setComposerForTest("Connection QA draft");
+					fixtureControl(minecraft, "auth-failed"); advance(Step.AUTH_ERROR, "simulating revoked fixture pairing");
+					return;
+				}
 				String wanted = System.getProperty("t3craft.focus");
 				if (wanted != null) {
 					snapshot.threads().stream().filter(t -> t.title().toLowerCase().contains(wanted.toLowerCase()))
@@ -973,6 +1019,7 @@ final class SelfTest {
 	}
 
 	private void finish(Minecraft minecraft, String result) {
+		step = Step.DONE;
 		T3CraftClient.LOGGER.info("SELFTEST RESULT {}", result);
 		minecraft.stop();
 	}

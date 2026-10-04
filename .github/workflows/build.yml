@@ -24,6 +24,9 @@ jobs:
           trap 'kill "$fixture_legacy_pid" "$fixture_v2_pid"' EXIT
           ./gradlew featureCheck build
           ./gradlew featureCheck -PfixturePort=25682
+          ./gradlew reliabilityCheck
+          ./gradlew reliabilityCheck -PfixturePort=25682
+          python3 scripts/check-launcher.py
       - uses: actions/upload-artifact@v4
         with:
           name: t3craft-jar

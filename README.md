@@ -39,6 +39,10 @@ Tested against legacy and protocol 2 fixtures, plus the installed T3 Code nightl
 
 ## Install and pair
 
+0.2.1 hardens local MCP access: native clients must address the exact loopback host and port; browser requests carrying an `Origin` header are refused. Requests larger than 64 KiB are refused. The command tool still requires `/t3 agent-build on` and the player's server permissions. Local programs with access to this endpoint share that permission.
+
+Connection errors now remain visible above a cached conversation. Expired/revoked pairings explain how to create a new link; unsupported T3 protocols explain which component needs an update. Offline threads are labelled in the sidebar, and drafts survive reconnects.
+
 **Quickest:** paste this into your coding agent (Claude Code, Codex, T3 Code itself…) on the machine you play Minecraft on:
 
 ```text
@@ -59,7 +63,7 @@ Set up T3 Craft (https://github.com/maxwellyoung/t3craft) on this machine so I c
 
 Or by hand:
 
-1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.2.0.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
+1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.2.1.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
 3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
 
@@ -103,7 +107,7 @@ Agents pick this up in new sessions, so start a new thread after adding it. Only
 ./scripts/install-macos-app.sh      # installs "T3 Craft.app" into /Applications
 ```
 
-Double-clicking **T3 Craft** starts the local test world if it isn't running, opens the Fabric dev client straight into it, and stops the world again when you quit. It needs no Minecraft account (offline dev client). Logs go to `~/Library/Logs/T3Craft/`. If a remote T3 server only answers on its own loopback, list SSH tunnels in `scripts/tunnels.local` (`local-port ssh-host remote-host:port`, one per line, not committed); the launcher opens them first, and you point that environment at `http://127.0.0.1:<local-port>`. The first launch after installing can take about a minute while macOS scans the new app.
+Double-clicking **T3 Craft** starts the local test world if it isn't running, opens the Fabric dev client straight into it, and sends `stop` to save and shut down only the world it started when you quit. Existing worlds and other launcher profiles keep running. It needs no Minecraft account (offline dev client). An existing `JAVA_HOME` is respected; otherwise the launcher locates Java 25+. Logs go to `~/Library/Logs/T3Craft/`. If a remote T3 server only answers on its own loopback, list SSH tunnels in `scripts/tunnels.local` (`local-port ssh-host remote-host:port`, one per line, not committed); the launcher opens them first, and you point that environment at `http://127.0.0.1:<local-port>`. The first launch after installing can take about a minute while macOS scans the new app.
 
 The dev client plays as `Player` unless you set a name in `scripts/launcher.local` (not committed), which also lets the app open a different local world:
 
@@ -111,6 +115,7 @@ The dev client plays as `Player` unless you set a name in `scripts/launcher.loca
 # scripts/launcher.local
 T3CRAFT_USERNAME=Steve              # offline name; keeps your op status and inventory on the local world
 T3CRAFT_SERVER_DIR=run-server       # which local world (its server.properties sets the port)
+# T3CRAFT_LOG_DIR=<folder>          # optional separate logs for this profile
 ```
 
 For a second world with its own app, give it its own profile and server folder (with a different `server-port`), then run `./scripts/install-macos-app.sh --name "My World" --profile scripts/my-world.local`.
@@ -120,7 +125,7 @@ For a second world with its own app, give it its own profile and server folder (
 Requires JDK 25 or newer as `JAVA_HOME` (Minecraft 26.x targets Java 25).
 
 ```sh
-./gradlew build                     # → build/libs/t3craft-0.2.0.jar
+./gradlew build                     # → build/libs/t3craft-0.2.1.jar
 ./gradlew runServer --args=nogui    # local offline test server in run-server/ (set white-list=false)
 ./gradlew runClient                 # dev client
 ```
@@ -142,7 +147,7 @@ Checks:
 
 ## How it works
 
-- **Pairing:** exchanges the T3 pairing link for a bearer token at `/oauth/token`, then uses the same HTTP routes as T3's own clients (`/api/orchestration/shell`, `/threads/:id`, `/dispatch`).
+- **Pairing:** exchanges the T3 pairing link for a bearer token at `/oauth/token`, then negotiates the environment's declared protocol. Legacy servers use HTTP thread snapshots and dispatch; protocol 2 uses bounded thread projections and RPC dispatch. Unsupported protocols fail with update guidance.
 - **Live updates:** a WebSocket (one-time ticket) subscribes to `orchestration.subscribeShell` for thread status. Events from `orchestration.subscribeThread` on the focused thread trigger a refetch of its recent turns, at most four times a second.
 - **Notifications:** only the focused thread and threads you prompted from Minecraft notify you. Each new approval or question pings once.
 - **Model list:** comes from `server.getConfig` over the same socket.
@@ -156,6 +161,12 @@ python3 scripts/feature-fixture.py --config "$PWD/run/feature-fixture.json"
 ```
 
 Then run `./gradlew featureCheck`. It exercises two-machine routing, older waiting threads, stale requests, disconnect/reconnect, checkpoint reply identity, and deleted/binary/renamed/empty patches. It never uses a real pairing or dispatches to an agent. Run the fixture with `--protocol2 --port 25682`, then `./gradlew featureCheck -PfixturePort=25682`, to exercise current T3 wire shapes. CI checks both protocols.
+
+`./gradlew reliabilityCheck` (or `-PfixturePort=25682`) checks MCP Host/Origin policy and auth/protocol recovery with the same isolated fixtures. `python3 scripts/check-launcher.py` checks that client success and failure both save/stop only the launcher-owned console server, preserving unrelated and reused servers. It never launches Minecraft or reads a user world.
+
+While the isolated Minecraft client is running, `python3 scripts/check-mcp.py` verifies the actual HTTP endpoint with read-only `tools/list` requests, rejected browser origins/Host headers and malformed/oversized bodies. It never runs a game tool.
+
+With protocol 2 fixtures reset and a disposable server running, `./gradlew runClient -Pselftest=connection-errors -Pjoin=localhost:25690 -Pconfig=<fixture-config>` verifies visible per-machine recovery guidance, reconnection and preserved drafts in the actual game. It requires the isolated fixtures on 25682/25683.
 
 For the game walkthrough, use a disposable creative dev server with `Player` opped. Reset both fixtures after the Java checks, then join that server:
 

@@ -77,6 +77,8 @@ class Fixture(ThreadingHTTPServer):
         self.connections = []
         self.subscribers = {}
         self.offline = False
+        self.auth_failed = False
+        self.protocol_version = 2 if self.protocol2 else 1
         self.reset()
 
     def reset(self):
@@ -84,6 +86,8 @@ class Fixture(ThreadingHTTPServer):
         self.threads[f'{self.machine}-waiting'] = thread(f'{self.machine}-waiting', True, self.machine == 'B', True)
         self.dispatches.clear()
         self.offline = False
+        self.auth_failed = False
+        self.protocol_version = 2 if self.protocol2 else 1
 
     def shell(self):
         return {'schemaVersion': 2 if self.protocol2 else 1, 'projects': [{'id': 'fixture-project', 'title': 'Greeting fixture'}], 'threads': [shell_thread(t) if self.protocol2 else t for t in self.threads.values()]}
@@ -103,6 +107,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         with self.server.lock:
+            if self.path == '/.well-known/t3/environment': return self.reply({'label': 'Fixture ' + self.server.machine, 'orchestrationProtocolVersion': self.server.protocol_version})
+            if self.path in ('/_qa/protocol3', '/_qa/auth-failed'):
+                if self.path == '/_qa/protocol3': self.server.protocol_version = 3
+                else: self.server.auth_failed = True
+                for connection in list(self.server.connections):
+                    try: connection.shutdown(socket.SHUT_RDWR)
+                    except OSError: pass
+                return self.reply({'ok': True})
             if self.path == '/_qa/dispatches': return self.reply(self.server.dispatches)
             if self.path == '/_qa/reset': self.server.reset(); return self.reply({'ok': True})
             if self.path == '/_qa/offline':
@@ -117,11 +129,13 @@ class Handler(BaseHTTPRequestHandler):
                 # Deliberately retain stale shell flags: response code must revalidate activities.
                 return self.reply({'ok': True})
             if self.server.offline: return self.reply({'message': 'Fixture offline'}, 503)
-            if self.server.protocol2 and self.path.startswith('/api/orchestration/') and self.headers.get('x-t3-orchestration-protocol') != '2': return self.reply({'message': 'Missing protocol header'}, 400)
+            if self.server.auth_failed: return self.reply({'message': 'Device access denied'}, 401)
+            if self.path.startswith('/api/orchestration/') and self.headers.get('x-t3-orchestration-protocol') != str(self.server.protocol_version): return self.reply({'message': 'Wrong protocol header'}, 400)
             if self.path.startswith('/ws?'):
                 if self.server.protocol2 and 'orchestrationProtocol=2' not in self.path: return self.reply({'message': 'Missing websocket protocol'}, 400)
             elif self.path == '/api/orchestration/shell': return self.reply(self.server.shell())
             elif self.path.startswith('/api/orchestration/threads/'):
+                if self.server.protocol2 != self.path.endswith('/bounded'): return self.reply({'message': 'Wrong thread endpoint'}, 404)
                 ident = self.path.split('/threads/')[1].split('?')[0].split('/')[0]
                 value = self.server.threads[ident]
                 return self.reply({'projection': projection(value)} if self.server.protocol2 else {'thread': value})
@@ -132,6 +146,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
         with self.server.lock:
             if self.server.offline: return self.reply({'message': 'Fixture offline'}, 503)
+            if self.server.auth_failed: return self.reply({'message': 'Device access denied'}, 401)
             if self.path == '/api/auth/websocket-ticket': return self.reply({'ticket': 'fixture-only'})
             if self.path == '/api/orchestration/dispatch':
                 command = json.loads(body)

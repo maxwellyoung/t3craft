@@ -68,31 +68,34 @@ final class T3Mcp {
 
 	private void handle(HttpExchange exchange) throws IOException {
 		try (exchange) {
+			if (!McpRequestPolicy.allows(exchange.getRequestHeaders(), PORT)) {
+				exchange.sendResponseHeaders(403, -1);
+				return;
+			}
 			if (!"POST".equals(exchange.getRequestMethod())) {
 				exchange.sendResponseHeaders(405, -1);
 				return;
 			}
-			// Browsers can reach loopback too; refuse anything that came from a web page.
-			String origin = exchange.getRequestHeaders().getFirst("Origin");
-			if (origin != null && !origin.startsWith("http://127.0.0.1") && !origin.startsWith("http://localhost")) {
-				exchange.sendResponseHeaders(403, -1);
-				return;
-			}
 			JsonElement body;
 			try (InputStream in = exchange.getRequestBody()) {
-				body = JsonParser.parseString(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+				byte[] bytes = in.readNBytes(65537);
+				if (bytes.length > 65536) { exchange.sendResponseHeaders(413, -1); return; }
+				try { body = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)); }
+				catch (RuntimeException e) { exchange.sendResponseHeaders(400, -1); return; }
 			}
 			JsonElement reply;
-			if (body.isJsonArray()) {
-				JsonArray replies = new JsonArray();
-				for (JsonElement message : body.getAsJsonArray()) {
-					JsonObject one = respond(message.getAsJsonObject());
-					if (one != null) replies.add(one);
+			try {
+				if (body.isJsonArray()) {
+					JsonArray replies = new JsonArray();
+					for (JsonElement message : body.getAsJsonArray()) {
+						JsonObject one = respond(message.getAsJsonObject());
+						if (one != null) replies.add(one);
+					}
+					reply = replies.isEmpty() ? null : replies;
+				} else {
+					reply = respond(body.getAsJsonObject());
 				}
-				reply = replies.isEmpty() ? null : replies;
-			} else {
-				reply = respond(body.getAsJsonObject());
-			}
+			} catch (RuntimeException e) { exchange.sendResponseHeaders(400, -1); return; }
 			if (reply == null) {
 				exchange.sendResponseHeaders(202, -1);
 				return;

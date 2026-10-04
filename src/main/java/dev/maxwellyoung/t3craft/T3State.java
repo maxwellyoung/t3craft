@@ -82,10 +82,12 @@ public final class T3State {
 	private final Map<String, Long> waitingFetchedAt = new HashMap<>();
 	private volatile List<T3Decisions.Entry> decisions = List.of();
 	private volatile Map<String, Boolean> onlineThreads = Map.of();
+	private volatile Map<String, String> connectionErrors = Map.of();
 	private volatile List<String> offlineMachines = List.of();
 
 	List<T3Decisions.Entry> decisions() { return decisions; }
-	public boolean online(String threadId) { return onlineThreads.getOrDefault(threadId, false); }
+	public boolean online(String threadId) { return threadId != null && onlineThreads.getOrDefault(threadId, false); }
+	String connectionError(String threadId) { return threadId == null ? null : connectionErrors.get(threadId); }
 	List<String> offlineMachines() { return offlineMachines; }
 
 	/** One paired environment: its API, socket, and shell mirror. Owned by the executor thread. */
@@ -192,6 +194,7 @@ public final class T3State {
 			waitingFetchedAt.clear();
 			decisions = List.of();
 			onlineThreads = Map.of();
+			connectionErrors = Map.of();
 			focusDetail = null;
 			List<Env> next = new ArrayList<>();
 			for (Connection connection : connections) next.add(new Env(connection.api(), connection.label()));
@@ -371,6 +374,7 @@ public final class T3State {
 		env.threadRequest = null;
 		env.threadRequestFor = null;
 		env.nextSocketAttempt = System.currentTimeMillis() + 2_000;
+		env.api.forgetProtocol();
 		env.error = "Reconnecting…";
 		publish(List.of());
 	}
@@ -554,8 +558,13 @@ public final class T3State {
 		String error = current.stream().filter(env -> env.error != null)
 			.map(env -> (current.size() > 1 ? env.label + ": " : "") + env.error).reduce((a, b) -> a + " · " + b).orElse(null);
 		Map<String, Boolean> health = new HashMap<>();
-		for (Env env : current) for (String id : env.threads.keySet()) health.put(id, env.error == null);
+		Map<String, String> errors = new HashMap<>();
+		for (Env env : current) for (String id : env.threads.keySet()) {
+			health.put(id, env.error == null);
+			if (env.error != null) errors.put(id, env.error);
+		}
 		onlineThreads = Map.copyOf(health);
+		connectionErrors = Map.copyOf(errors);
 		offlineMachines = current.stream().filter(env -> env.error != null || env.threads.isEmpty() && !env.shellLive)
 			.map(env -> env.label).toList();
 		decisions = T3Decisions.collect(rows, waitingThreads);

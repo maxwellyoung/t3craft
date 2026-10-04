@@ -518,11 +518,12 @@ final class T3Screen extends Screen {
 			boolean hovered = mouseX >= x0 && mouseX < x1 && mouseY >= y && mouseY < y + ROW;
 			if (row.id().equals(focused) && !newThread) graphics.fill(x0 + 2, y, x1 - 2, y + ROW, 0x40FFFFFF);
 			else if (hovered) graphics.fill(x0 + 2, y, x1 - 2, y + ROW, 0x20FFFFFF);
-			graphics.fill(x0 + 8, y + 5, x0 + 12, y + 9, T3Hud.color(row.status()));
+			boolean online = mod.state().online(row.id());
+			graphics.fill(x0 + 8, y + 5, x0 + 12, y + 9, online ? T3Hud.color(row.status()) : 0xFF6B7280);
 			graphics.text(font, T3Hud.ellipsize(font, row.title(), SIDEBAR - 24), x0 + 16, y + 3, 0xFFE5E7EB, false);
 			// The machine is in the filter row when filtering, so it's only repeated per row for "All".
 			String machine = row.environment() == null || envFilter != null ? "" : row.environment() + " · ";
-			String meta = machine + row.projectTitle() + " · " + T3Hud.label(row.status());
+			String meta = (online ? "" : "Offline · ") + machine + row.projectTitle() + " · " + T3Hud.label(row.status());
 			graphics.text(font, T3Hud.ellipsize(font, meta, SIDEBAR - 24), x0 + 16, y + 12, 0xFF6B7280, false);
 			y += ROW;
 		}
@@ -561,8 +562,8 @@ final class T3Screen extends Screen {
 		String status = mod.state().online(row.id()) ? T3Hud.label(row.status()) : "Offline · last-known status";
 		if (row.status() == T3State.Status.WORKING) status += " " + T3Hud.elapsed(row.workingSince()) + (row.step() == null ? "" : " · " + row.step());
 		String meta = (row.environment() == null ? "" : row.environment() + " · ") + row.projectTitle() + " · ";
-		graphics.text(font, meta, x0 + 10, MARGIN + 16, 0xFF6B7280, false);
-		graphics.text(font, T3Hud.ellipsize(font, status, chipX() - x0 - 20 - font.width(meta)), x0 + 10 + font.width(meta), MARGIN + 16, T3Hud.color(row.status()), false);
+		graphics.text(font, T3Hud.ellipsize(font, status + " · " + meta, chipX() - x0 - 20), x0 + 10, MARGIN + 16,
+			mod.state().online(row.id()) ? T3Hud.color(row.status()) : 0xFF9CA3AF, false);
 		graphics.horizontalLine(x0, x1 - 1, MARGIN + HEADER, 0x30FFFFFF);
 
 		boolean hasApproval = currentApproval() != null;
@@ -571,6 +572,15 @@ final class T3Screen extends Screen {
 		int questionHeight = question == null ? 0 : questionCardHeight(question, x1 - x0 - 24);
 		int bottom = composerY - 6 - (hasApproval ? APPROVAL : 0) - questionHeight;
 		int top = MARGIN + HEADER + 4;
+		String connectionError = mod.state().connectionError(row.id());
+		if (connectionError != null) {
+			int errorHeight = Math.min(Math.max(0, bottom - top - 10), font.split(Component.literal(connectionError), x1 - x0 - 20).size() * font.lineHeight + 8);
+			graphics.enableScissor(x0, top, x1, top + errorHeight);
+			graphics.fill(x0, top, x1, top + errorHeight, 0x802C1818);
+			graphics.textWithWordWrap(font, Component.literal(connectionError), x0 + 10, top + 4, x1 - x0 - 20, 0xFFFFA9A9);
+			graphics.disableScissor();
+			top += errorHeight + 6;
+		}
 
 		if (!pickerOpen && !newThread && focus != null && focus.threadId().equals(row.id())) {
 			List<T3Markdown.Line> lines = lines(focus, x1 - x0 - 28);

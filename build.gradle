@@ -20,6 +20,7 @@ loom {
 		server {
 			// -PserverDir=<dir> runs a second local world with its own server.properties and port.
 			runDir (project.findProperty('serverDir') ?: 'run-server')
+			if (project.hasProperty('launcherId')) vmArg "-Dt3craft.launcherId=${project.property('launcherId')}"
 		}
 		client {
 			// Fixed offline name so the local server's ops.json keeps you opped (-Pusername=<name>).
@@ -44,6 +45,9 @@ loom {
 		}
 	}
 }
+
+// The local launcher owns this invocation's stdin and sends a graceful `stop` on exit.
+tasks.named('runServer', JavaExec) { standardInput = System.in }
 
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
@@ -81,6 +85,13 @@ tasks.register('featureCheck', JavaExec) {
 	description = 'Decision routing and checkpoint review against scripts/feature-fixture.py (loopback only).'
 	classpath = sourceSets.smoke.runtimeClasspath
 	mainClass = 'dev.maxwellyoung.t3craft.FeatureChecks'
+	args = [project.findProperty('fixturePort') ?: '25680']
+}
+
+tasks.register('reliabilityCheck', JavaExec) {
+	description = 'MCP request boundary and connection recovery against the isolated T3 fixture.'
+	classpath = sourceSets.smoke.runtimeClasspath
+	mainClass = 'dev.maxwellyoung.t3craft.ReliabilityChecks'
 	args = [project.findProperty('fixturePort') ?: '25680']
 }
 

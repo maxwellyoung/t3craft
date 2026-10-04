@@ -36,6 +36,7 @@ public final class T3Api {
 	private final String baseUrl;
 	private final String accessToken;
 	private volatile boolean protocol2;
+	private volatile int wireProtocol;
 
 	public T3Api(String baseUrl, String accessToken) {
 		this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
@@ -43,6 +44,29 @@ public final class T3Api {
 	}
 
 	public record Pairing(String baseUrl, String accessToken, long expiresInSeconds) {}
+
+	/** Public environment metadata determines the protocol before any authenticated request. */
+	private int protocol() throws IOException, InterruptedException {
+		if (wireProtocol != 0) return wireProtocol;
+		HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/.well-known/t3/environment"))
+			.timeout(Duration.ofSeconds(5)).GET().build();
+		HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+		if (response.statusCode() / 100 != 2) throw new IOException("Could not check this T3 machine's protocol. Check its address and network access.");
+		JsonObject metadata = JsonParser.parseString(response.body()).getAsJsonObject();
+		int version = metadata.has("orchestrationProtocolVersion") && !metadata.get("orchestrationProtocolVersion").isJsonNull()
+			? metadata.get("orchestrationProtocolVersion").getAsInt() : 1;
+		if (version < 1 || version > 2) throw new UnsupportedVersionException("This machine uses T3 protocol " + version
+			+ ". T3 Craft supports protocols 1 and 2. " + (version > 2 ? "Update T3 Craft before reconnecting." : "Update T3 Code before reconnecting."));
+		protocol2 = version == 2;
+		wireProtocol = version;
+		return version;
+	}
+
+	void forgetProtocol() { wireProtocol = 0; }
+
+	public static final class UnsupportedVersionException extends IOException {
+		UnsupportedVersionException(String message) { super(message); }
+	}
 
 	/** Accepts a T3 pairing URL (`http://host:port/pair#token=…`) and exchanges it for a bearer token. */
 	public static Pairing pair(String pairingUrl, String clientLabel) throws IOException, InterruptedException {
@@ -88,7 +112,8 @@ public final class T3Api {
 	T3Socket openSocket(java.util.function.Consumer<String> onClose) throws IOException, InterruptedException {
 		JsonObject ticket = JsonParser.parseString(send(authorized("/api/auth/websocket-ticket")
 			.POST(HttpRequest.BodyPublishers.noBody()).build())).getAsJsonObject();
-		URI uri = URI.create(baseUrl.replaceFirst("^http", "ws") + "/ws?orchestrationProtocol=2&wsTicket=" + enc(ticket.get("ticket").getAsString()));
+		URI uri = URI.create(baseUrl.replaceFirst("^http", "ws") + "/ws?wsTicket=" + enc(ticket.get("ticket").getAsString())
+			+ (protocol2 ? "&orchestrationProtocol=2" : ""));
 		return T3Socket.connect(HTTP, uri, onClose);
 	}
 
@@ -162,6 +187,7 @@ public final class T3Api {
 
 	/** Recent window of one thread: messages, activities (approvals), session. */
 	public JsonObject thread(String threadId, int turnLimit) throws IOException, InterruptedException {
+		protocol();
 		JsonObject body = get("/api/orchestration/threads/" + enc(threadId) + (protocol2 ? "/bounded" : "?turnLimit=" + turnLimit)).getAsJsonObject();
 		if (body.has("projection")) { protocol2 = true; return T3Protocol.projection(body.getAsJsonObject("projection")); }
 		return body.getAsJsonObject("thread");
@@ -269,6 +295,7 @@ public final class T3Api {
 	}
 
 	public void interrupt(String threadId) throws IOException, InterruptedException {
+		protocol();
 		JsonObject command = command("thread.turn.interrupt", threadId);
 		if (protocol2) {
 			String run = null;
@@ -306,6 +333,7 @@ public final class T3Api {
 	}
 
 	private void dispatch(JsonObject command) throws IOException, InterruptedException {
+		protocol();
 		if (protocol2) {
 			JsonObject mapped = command.deepCopy(); mapped.remove("createdAt");
 			switch (command.get("type").getAsString()) {
@@ -335,17 +363,18 @@ public final class T3Api {
 		return JsonParser.parseString(send(authorized(path).GET().build()));
 	}
 
-	private HttpRequest.Builder authorized(String path) {
+	private HttpRequest.Builder authorized(String path) throws IOException, InterruptedException {
 		return HttpRequest.newBuilder(URI.create(baseUrl + path))
 			.timeout(Duration.ofSeconds(20))
 			.header("authorization", "Bearer " + accessToken)
-			.header("x-t3-orchestration-protocol", "2");
+			.header("x-t3-orchestration-protocol", Integer.toString(protocol()));
 	}
 
 	private String send(HttpRequest request) throws IOException, InterruptedException {
 		HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
 		if (response.statusCode() == 401 || response.statusCode() == 403) {
-			throw new AuthException("T3 rejected this device (" + response.statusCode() + "). Pair again with /t3 pair <url>.");
+			throw new AuthException("Pairing expired, was revoked, or lacks access (" + response.statusCode()
+				+ "). Create a new pairing link in T3 Settings > Connections, then use /t3 pair <link>.");
 		}
 		if (response.statusCode() / 100 != 2) {
 			throw new IOException("T3 " + request.method() + " " + request.uri().getPath() + " → " + response.statusCode() + ": " + errorText(response.body()));
