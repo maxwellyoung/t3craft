@@ -4,13 +4,15 @@
 
 ![A real T3 checkpoint reviewed in Minecraft, with changed files and its Git patch](docs/checkpoint-review.png)
 
-A release jar for ordinary Fabric profiles, with a personal client office or an operator-owned shared server office. [Download 0.4.0](https://github.com/maxwellyoung/t3craft/releases/tag/v0.4.0).
+A release jar for ordinary Fabric profiles, with a personal client office or an operator-owned shared server office. [Download 0.5.0](https://github.com/maxwellyoung/t3craft/releases/tag/v0.5.0).
 
 ![What it built, with the single "Done" toast](docs/agent-build.jpg)
 
 It is a Fabric mod for Minecraft Java 26.3. On the client it connects to your T3 environments the same way the mobile app does, so it works on any server, and prompts never go through server chat. Installed on a dedicated server as well, it can also run a shared village that everyone on the server sees.
 
 > **Early project.** 0.3.0 checkpoint review was verified against T3 Code nightly `0.0.46-nightly.20261004.2644`. The earlier `0.0.46-nightly.20261003.2638` walkthrough also exercised a real agent edit and approvals. It uses T3's client protocol, which is not a documented public API and may change.
+
+[Start with a five-minute first session](docs/FIRST_SESSION.md) if you are trying it for the first time.
 
 ## What it does
 
@@ -60,7 +62,7 @@ Open **Activity** beside Connections in the panel. It shows the focused thread's
 
 ## Guided connections (0.4.0)
 
-The next version opens a private pairing form when you press **`** or run `/t3` while unpaired. In T3 Code, create a pairing link under **Settings > Connections**, then choose **Paste link** and **Pair machine**. The value is hidden from the screen and narration, and never enters Minecraft chat through this form. A machine name is optional.
+Version 0.4.0 and later open a private pairing form when you press **`** or run `/t3` while unpaired. In T3 Code, create a pairing link under **Settings > Connections**, then choose **Paste link** and **Pair machine**. The value is hidden from the screen and narration, and never enters Minecraft chat through this form. A machine name is optional.
 
 Use **Connections** in the panel or `/t3 connections` to add machines, see live/polling health, retry one connection or replace an expired pairing. **Re-pair** accepts only the selected machine's address; use **Add machine** for a different address. Removing one machine asks for confirmation and preserves the others' sockets, focused conversation, draft and pins. Removal is local only: revoke the Minecraft device in that machine's T3 settings separately. Saved pins remain available if the same address is paired again. Shared server pairings remain operator-owned.
 
@@ -98,7 +100,7 @@ Or by hand:
 
 1. Install Minecraft Java 26.3 with [Fabric Loader](https://fabricmc.net/use/) 0.19.5+ and [Fabric API](https://modrinth.com/mod/fabric-api). Download `t3craft-0.5.0.jar` from [Releases](https://github.com/maxwellyoung/t3craft/releases/latest) (or build it, below) and put it in `mods/`.
 2. In T3 Code, go to **Settings → Connections** and create a pairing link. If Minecraft runs on a different machine from T3, turn on network access first so the link uses an address that machine can reach. For a headless server, run `t3 pair` there.
-3. In game, run `/t3 pair <link>`. Repeat for each environment you want to add.
+3. In game, press **`** or run `/t3`, then use **Paste link → Pair machine** in the private form. Repeat through **Connections → Add machine** for another environment. Keep pairing links out of game chat and messages to agents.
 
 Pairing asks only for `orchestration:read orchestration:operate`. The token lasts 30 days and is saved to `config/t3craft.json` with owner-only permissions. To remove the device, revoke "Minecraft" in T3 under **Settings → Connections**.
 
